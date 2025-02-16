@@ -2,19 +2,38 @@ package parser
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
+	"petersearch/pkg/utils/stream"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/mfonda/simhash"
 )
 
 type RawDoc struct {
 	URL      string `json:"url"`
 	Content  string `json:"content"`
 	Encoding string `json:"encoding"`
+}
+
+type Doc struct {
+	ID     int
+	URL    string
+	Tokens []string
+	TagMap map[string][]string
+}
+
+func (doc *Doc) Print() {
+	fmt.Println(doc.Tokens)
+	for tag, list := range doc.TagMap {
+		fmt.Printf("%s: %v\n", tag, list)
+	}
 }
 
 func ReadFiles(srcDir string) ([]string, error) {
@@ -35,6 +54,8 @@ func ReadFiles(srcDir string) ([]string, error) {
 			validFiles = append(validFiles, filepath.Join(srcDir, dirName.Name(), file.Name()))
 		}
 	}
+
+	log.Printf("Raw files count: %d\n", len(validFiles))
 
 	return validFiles, nil
 }
@@ -75,27 +96,33 @@ func ReadRawDoc(file string) (RawDoc, error) {
 	return rawDoc, nil
 }
 
-func ParseDir(srcDir string, workerNum int) ([]RawDoc, error) {
-	if workerNum == -1 {
+func ParseDirDocs(rawFiles []string, workerNum int, consumer stream.Consumer) error {
+	if workerNum <= 0 {
 		workerNum = runtime.NumCPU() * 2
 	}
 
-	rawFiles, err := ReadFiles(srcDir)
-	if err != nil {
-		return nil, err
-	}
-	log.Printf("Raw files count: %d\n", len(rawFiles))
-
-	readWorker := func(in <-chan []string, out chan<- []RawDoc, wg *sync.WaitGroup) {
+	dupMap := sync.Map{}
+	// binmask := ^uint64(7)
+	readWorker := func(in <-chan []string, out chan<- []Doc, wg *sync.WaitGroup) {
 		defer wg.Done()
 		for files := range in {
-			out <- ReadRawDocs(files)
+			rawDocs := ReadRawDocs(files)
+			docs := ParseDocs(rawDocs)
+			newDocs := []Doc{}
+			for _, doc := range docs {
+				// hash := simhash.Simhash(simhash.NewWordFeatureSet([]byte(strings.Join(doc.Tokens, " ")))) & binmask
+				hash := simhash.Simhash(simhash.NewWordFeatureSet([]byte(strings.Join(doc.Tokens, " "))))
+				if _, ok := dupMap.LoadOrStore(hash, struct{}{}); !ok {
+					newDocs = append(newDocs, doc)
+				}
+			}
+			out <- newDocs
 		}
 	}
 
-	rawDocs := []RawDoc{}
+	docs := []Doc{}
 	fileCh := make(chan []string)
-	docCh := make(chan []RawDoc, workerNum)
+	docCh := make(chan []Doc, workerNum)
 
 	var wg sync.WaitGroup
 	wg.Add(workerNum)
@@ -125,21 +152,38 @@ func ParseDir(srcDir string, workerNum int) ([]RawDoc, error) {
 		log.Println("Parse phase completed.")
 	}()
 
+	docID := 0
 	for docs := range docCh {
 		// fmt.Println("Received")
-		rawDocs = append(rawDocs, docs...)
+		for _, doc := range docs {
+			doc.ID = docID
+			docID++
+			consumer.Consume(doc)
+		}
 	}
 	log.Printf(
 		"Parse thread count: %d. Raw docs count: %d. Using %v\n",
-		workerNum, len(rawDocs), time.Since(start))
+		workerNum, len(docs), time.Since(start))
 
-	return rawDocs, nil
+	return nil
 }
 
-func readSourceFile() {
-
+func ParseDocs(rawDocs []RawDoc) []Doc {
+	docs := []Doc{}
+	for _, rawDoc := range rawDocs {
+		docs = append(docs, ParseDoc(rawDoc))
+	}
+	return docs
 }
 
-func removeDupFile() {
-
+func ParseDoc(rawDoc RawDoc) Doc {
+	content := Sanitize(rawDoc.Content)
+	tokens := ParseTokens(content)
+	rawTagMap := ExtractTagMap(rawDoc.Content)
+	tagMap := ParseTagMap(rawTagMap)
+	return Doc{
+		URL:    rawDoc.URL,
+		Tokens: tokens,
+		TagMap: tagMap,
+	}
 }

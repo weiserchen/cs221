@@ -2,3 +2,4 @@ developer.zip
 DEV/
 bin/indexer/indexer
 bin/parser/parser
+pkg/indexer/testdir

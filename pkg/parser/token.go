@@ -1,7 +1,6 @@
 package parser
 
 import (
-	"fmt"
 	"html"
 	"regexp"
 	"strings"
@@ -11,28 +10,6 @@ import (
 
 	"github.com/microcosm-cc/bluemonday"
 )
-
-type Doc struct {
-	Tokens []string
-	TagMap map[string][]string
-}
-
-func (doc *Doc) Print() {
-	fmt.Println(doc.Tokens)
-	for tag, list := range doc.TagMap {
-		fmt.Printf("%s: %v\n", tag, list)
-	}
-}
-
-func ParseDoc(s string) Doc {
-	content := Sanitize(s)
-	tokens := ParseTokens(content)
-	tagMap := ExtractTagMap(s)
-	return Doc{
-		Tokens: tokens,
-		TagMap: tagMap,
-	}
-}
 
 func ExtractTagMap(s string) map[string][]string {
 	count := map[string][]string{}
