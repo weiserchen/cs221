@@ -172,6 +172,37 @@ type InvertedListIter struct {
 	Stop func()
 }
 
+func InMemoryInvertedListIterator(list InvertedList) InvertedListIter {
+	var listIter InvertedListIter
+
+	iterFunc := func(yield func(int, Posting) bool) {
+		for i, posting := range list.Postings {
+			if !yield(i, posting) {
+				return
+			}
+		}
+	}
+
+	listIter.Next, listIter.Stop = iter.Pull2(iterFunc)
+
+	return listIter
+}
+
+func CollectInvertedList(listIter InvertedListIter) []Posting {
+	defer listIter.Stop()
+	var postings []Posting
+
+	for {
+		_, posting, ok := listIter.Next()
+		if !ok {
+			break
+		}
+		postings = append(postings, posting)
+	}
+
+	return postings
+}
+
 func ReadInvertedList(br *ByteReader) (InvertedListIter, error) {
 	var list InvertedListIter
 	term, err := br.ReadString()

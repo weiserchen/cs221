@@ -63,7 +63,6 @@ func KwayMergeReader(indexIters []PartialIndexIter) PartialIndexIter {
 			if !ok {
 				continue
 			}
-			defer listIter.Stop()
 
 			term := listIter.Term
 			if len(itemMap[term]) == 0 {
@@ -88,19 +87,20 @@ func KwayMergeReader(indexIters []PartialIndexIter) PartialIndexIter {
 				listIters = append(listIters, item.ListIter)
 			}
 			outListIter := KwayMergeWriter(listIters)
+			// outList := KwayMergeWriterCollector(listIters)
+			// outListIter := InMemoryInvertedListIterator(outList)
 
 			if !yield(count, outListIter) {
 				break
 			}
 			count++
-			itemMap[term] = []Item{}
+			delete(itemMap, term)
 
 			for _, item := range items {
 				_, listIter, ok := indexIters[item.ID].Next()
 				if !ok {
 					continue
 				}
-				defer listIter.Stop()
 
 				term := listIter.Term
 				if len(itemMap[term]) == 0 {
@@ -122,6 +122,18 @@ func KwayMergeReader(indexIters []PartialIndexIter) PartialIndexIter {
 	return outIter
 }
 
+func KwayMergeWriterCollector(listIters []InvertedListIter) InvertedList {
+	var list InvertedList
+	list.Term = listIters[0].Term
+
+	for _, listIter := range listIters {
+		list.Postings = append(list.Postings, CollectInvertedList(listIter)...)
+	}
+	slices.SortFunc(list.Postings, SortPostingsComparator())
+
+	return list
+}
+
 func KwayMergeWriter(listIters []InvertedListIter) InvertedListIter {
 	type Item struct {
 		ID      int
@@ -140,10 +152,10 @@ func KwayMergeWriter(listIters []InvertedListIter) InvertedListIter {
 		listMap := map[int]InvertedListIter{}
 		writerQ := pq.NewWith(comparator)
 		for i, listIter := range listIters {
+			defer listIter.Stop()
 			listMap[i] = listIter
 			_, posting, ok := listIter.Next()
 			if !ok {
-				listIter.Stop()
 				continue
 			}
 			writerQ.Enqueue(Item{

@@ -8,7 +8,6 @@ import (
 	"petersearch/pkg/utils/stream"
 	"runtime"
 	"runtime/pprof"
-	"runtime/trace"
 	"sort"
 	"time"
 )
@@ -61,22 +60,27 @@ const MB = 1000.0 * 1000.0
 func printMemoryUsed() {
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
-	log.Printf("Memory used: %.2f MB.\n", float64(memStats.Alloc)/MB)
+	log.Printf("Memory used: %.2f MB. StackSys: %.2f MB. HeapSys: %.2f MB.\n",
+		float64(memStats.Alloc)/MB, float64(memStats.StackSys)/MB, float64(memStats.HeapInuse)/MB)
 }
 
 func main() {
-	traceF, err := os.Create("trace.out")
-	if err != nil {
-		log.Fatal(err)
-	}
-	err = trace.Start(traceF)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer trace.Stop()
+	defer func() {
+		runtime.GC()
+		printMemoryUsed()
+	}()
+	// traceF, err := os.Create("trace.out")
+	// if err != nil {
+	// 	log.Fatal(err)
+	// }
+	// err = trace.Start(traceF)
+	// if err != nil {
+	// 	log.Fatal(err)
+	// }
+	// defer trace.Stop()
 
 	batch := 100
-	tasks := 10
+	tasks := 100
 	partialIndexes, _ := readParsedFiles(4, batch*tasks, batch)
 	// partialIndexes, _ := readParsedFiles(4, -1, batch)
 	// partialIndexes, _ := testParseFiles(t, 1, 4, 1)
@@ -87,7 +91,7 @@ func main() {
 	// }
 
 	tempDir := "./temp-index"
-	_, err = os.Stat("./temp-index")
+	_, err := os.Stat("./temp-index")
 	if os.IsNotExist(err) {
 		err := os.Mkdir(tempDir, 0755)
 		if err != nil {
@@ -136,10 +140,10 @@ func main() {
 	// invertedLists := []indexer.InvertedList{}
 	outIter := indexer.KwayMergeReader(indexIters)
 	postingCount := 0
-	listCount := 0
+	termCount := 0
 	defer outIter.Stop()
 	for {
-		if listCount%10000 == 0 {
+		if termCount%10000 == 0 {
 			printMemoryUsed()
 			// log.Println("bw buffered:", bufWriter.Buffered())
 			// runtime.GC()
@@ -148,8 +152,7 @@ func main() {
 		if !ok {
 			break
 		}
-		defer listIter.Stop()
-		listCount++
+		termCount++
 
 		if bw.WriteString(listIter.Term); err != nil {
 			log.Fatal(err)
@@ -168,6 +171,8 @@ func main() {
 			// postings = append(postings, posting)
 		}
 
+		listIter.Stop()
+
 		// invertedLists = append(invertedLists, indexer.InvertedList{
 		// 	Term:     listIter.Term,
 		// 	Postings: postings,
@@ -180,8 +185,8 @@ func main() {
 	}
 
 	log.Printf(
-		"Batch: %d. Tasks: %d. Total Postings: %d. Size: %.2f MB. Time: %v\n",
-		batch, tasks, postingCount, float64(fi.Size())/MB, time.Since(start))
+		"Batch: %d. Tasks: %d. Terms: %d. Postings: %d. Size: %.2f MB. Time: %v\n",
+		batch, tasks, termCount, postingCount, float64(fi.Size())/MB, time.Since(start))
 
 	memF, err := os.Create("mem.prof")
 	if err != nil {
