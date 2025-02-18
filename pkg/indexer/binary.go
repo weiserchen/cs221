@@ -18,6 +18,10 @@ func NewBufferedWriteCloser(w io.WriteCloser) *BufferedWriteCloser {
 	}
 }
 
+func (bw *BufferedWriteCloser) Buffered() int {
+	return bw.w.Buffered()
+}
+
 func (bw *BufferedWriteCloser) Write(p []byte) (n int, err error) {
 	return bw.w.Write(p)
 }
@@ -26,6 +30,7 @@ func (bw *BufferedWriteCloser) Close() error {
 	if err := bw.w.Flush(); err != nil {
 		return err
 	}
+	bw.w = nil
 	return bw.wc.Close()
 }
 
@@ -46,6 +51,7 @@ func (br *BufferedReadCloser) Read(p []byte) (n int, err error) {
 }
 
 func (br *BufferedReadCloser) Close() error {
+	br.r = nil
 	return br.rc.Close()
 }
 

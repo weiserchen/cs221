@@ -120,7 +120,6 @@ func ParseDirDocs(rawFiles []string, workerNum int, consumer stream.Consumer) er
 		}
 	}
 
-	docs := []Doc{}
 	fileCh := make(chan []string)
 	docCh := make(chan []Doc, workerNum)
 
@@ -154,7 +153,6 @@ func ParseDirDocs(rawFiles []string, workerNum int, consumer stream.Consumer) er
 
 	docID := 0
 	for docs := range docCh {
-		// fmt.Println("Received")
 		for _, doc := range docs {
 			doc.ID = docID
 			docID++
@@ -163,7 +161,7 @@ func ParseDirDocs(rawFiles []string, workerNum int, consumer stream.Consumer) er
 	}
 	log.Printf(
 		"Parse thread count: %d. Raw docs count: %d. Using %v\n",
-		workerNum, len(docs), time.Since(start))
+		workerNum, docID, time.Since(start))
 
 	return nil
 }

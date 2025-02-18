@@ -11,18 +11,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestBinaryReadWrite(t *testing.T) {
+func testParseFiles(t *testing.T, workers, total, batch int) ([]PartialIndex, DocStats) {
+	t.Helper()
+
 	srcDir := "../../DEV"
-	workers := 1
 	consumer := stream.NewArrayConsumer[parser.Doc]()
 
 	rawFiles, err := parser.ReadFiles(srcDir)
 	require.NoError(t, err)
 
-	// For testing
 	sort.Strings(rawFiles)
-	count := 1000
-	rawFiles = rawFiles[:count]
+	rawFiles = rawFiles[:total]
 
 	err = parser.ParseDirDocs(rawFiles, workers, consumer)
 	require.NoError(t, err)
@@ -32,7 +31,6 @@ func TestBinaryReadWrite(t *testing.T) {
 		return docs[i].ID < docs[j].ID
 	})
 
-	batch := 100
 	docProducer := stream.NewArrayProducer(docs)
 	indexConsumer := stream.NewArrayConsumer[PartialIndex]()
 	statsConsumer := stream.NewArrayConsumer[*DocStats]()
@@ -46,11 +44,30 @@ func TestBinaryReadWrite(t *testing.T) {
 	}()
 
 	<-waitCh
-	docStats := statsConsumer.Collect()[0]
-	partialIndexes := indexConsumer.Collect()
 
-	// require.Equal(t, count, docStats.DocCount)
-	// require.Equal(t, count/batch, len(allInvertedLists))
+	indexes := indexConsumer.Collect()
+	stats := statsConsumer.Collect()[0]
+	return indexes, *stats
+}
+
+func TestUniquePostings(t *testing.T) {
+	partialIndexes, _ := testParseFiles(t, 1, 1000, 10)
+	set := map[string]bool{}
+	for _, index := range partialIndexes {
+		for _, postings := range index {
+			for _, posting := range postings {
+				postingID := posting.ID()
+				_, ok := set[postingID]
+				require.False(t, ok)
+				set[postingID] = true
+			}
+		}
+	}
+}
+
+func TestBinaryReadWrite(t *testing.T) {
+	partialIndexes, docStats := testParseFiles(t, 1, 100, 10)
+
 	terms := []string{}
 	for term := range partialIndexes[0] {
 		terms = append(terms, term)
@@ -61,14 +78,8 @@ func TestBinaryReadWrite(t *testing.T) {
 		fmt.Println(term, postings)
 	}
 	fmt.Println(docStats.DocCount)
-	// for _, f := range rawFiles {
-	// 	fmt.Println(f)
-	// }
-	// for _, doc := range docs {
-	// 	fmt.Println(doc.ID)
-	// }
 
-	tempDir := "./testdir"
+	tempDir := "./bin-rw"
 	if _, err := os.Stat(tempDir); os.IsNotExist(err) {
 		err := os.Mkdir(tempDir, 0755)
 		require.NoError(t, err)
@@ -83,7 +94,7 @@ func TestBinaryReadWrite(t *testing.T) {
 		fileName := file.Name()
 		require.NoError(t, err)
 		bw := NewByteWriter(NewBufferedWriteCloser(file))
-		WritePartialIndex(index, bw)
+		WritePartialIndex(bw, index)
 		bw.Close()
 
 		f, err := os.Open(fileName)
@@ -105,4 +116,140 @@ func TestBinaryReadWrite(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestKwayMergeReaderWriter(t *testing.T) {
+	batch := 10
+	tasks := 10
+	partialIndexes, _ := testParseFiles(t, 1, batch*tasks, batch)
+	// partialIndexes, _ := testParseFiles(t, 1, 4, 1)
+	inMemoryIndex := InMemoryMergePartialIndexes(partialIndexes...)
+
+	indexIters := []PartialIndexIter{}
+	for _, partialIndex := range partialIndexes {
+		indexIters = append(indexIters, partialIndex.SortedIter())
+	}
+
+	invertedLists := []InvertedList{}
+	outIter := KwayMergeReader(indexIters)
+	defer outIter.Stop()
+	for {
+		_, listIter, ok := outIter.Next()
+		if !ok {
+			break
+		}
+		defer listIter.Stop()
+
+		postings := []Posting{}
+		for {
+			_, posting, ok := listIter.Next()
+			if !ok {
+				break
+			}
+			postings = append(postings, posting)
+		}
+
+		invertedLists = append(invertedLists, InvertedList{
+			Term:     listIter.Term,
+			Postings: postings,
+		})
+	}
+
+	set := map[string]bool{}
+	for _, list := range invertedLists {
+		for _, posting := range list.Postings {
+			postingID := posting.ID()
+			_, ok := set[postingID]
+			require.False(t, ok)
+			set[postingID] = true
+		}
+	}
+
+	require.Equal(t, len(inMemoryIndex), len(invertedLists))
+	prevTerm := ""
+	for _, list := range invertedLists {
+		require.Greater(t, list.Term, prevTerm)
+		_, ok := inMemoryIndex[list.Term]
+		require.True(t, ok)
+		prevTerm = list.Term
+	}
+	for i, list := range invertedLists {
+		expectedPostings, ok := inMemoryIndex[list.Term]
+		require.True(t, ok)
+		require.Equal(t, len(expectedPostings), len(list.Postings),
+			fmt.Sprintf("%d, %s: %v, %v", i, list.Term, expectedPostings, list.Postings))
+
+		for i, posting := range list.Postings {
+			require.Equal(t, expectedPostings[i], posting,
+				fmt.Sprintf("%s: %v, %v", list.Term, expectedPostings, list.Postings))
+		}
+	}
+
+	tempDir := "./temp-index"
+	_, err := os.Stat("./temp-index")
+	if os.IsNotExist(err) {
+		err := os.Mkdir(tempDir, 0755)
+		require.NoError(t, err)
+	}
+	t.Cleanup(func() {
+		os.RemoveAll(tempDir)
+	})
+
+	file, err := os.CreateTemp(tempDir, "index")
+	require.NoError(t, err)
+	bw := NewByteWriter(NewBufferedWriteCloser(file))
+	err = WritePartialIndex(bw, inMemoryIndex)
+	require.NoError(t, err)
+	bw.Close()
+
+	// f, err := os.Open(file.Name())
+	// require.NoError(t, err)
+	// br := NewByteReader(NewBufferedReadCloser(f))
+	// savedIndex, err := ReadPartialIndex(br)
+	// require.NoError(t, err)
+	// savedList := savedIndex.SortedList()
+	savedList := []InvertedList{}
+	fileIter := FilePartialIndexIterator(file.Name())
+	for {
+		_, listIter, ok := fileIter.Next()
+		if !ok {
+			break
+		}
+
+		postings := []Posting{}
+		for {
+			_, posting, ok := listIter.Next()
+			if !ok {
+				break
+			}
+			postings = append(postings, posting)
+		}
+		savedList = append(savedList, InvertedList{
+			Term:     listIter.Term,
+			Postings: postings,
+		})
+	}
+
+	require.Equal(t, len(invertedLists), len(savedList))
+	for i := 0; i < len(savedList); i++ {
+		require.Equal(t, invertedLists[i].Term, savedList[i].Term)
+		require.Equal(t, len(invertedLists[i].Postings), len(savedList[i].Postings))
+		for j := 0; j < len(savedList[i].Postings); j++ {
+			require.Equal(t, invertedLists[i].Postings[j], savedList[i].Postings[j])
+		}
+	}
+}
+
+func TestMergePartialIndexes(t *testing.T) {
+	// partialIndexes, _ := testParseFiles(t, 1, 100, 10)
+	// inMemoryIndex := InMemoryMergePartialIndexes(partialIndexes...)
+	// tempDir := "./merge-partial"
+	// indexProducer := stream.NewArrayProducer(partialIndexes)
+	// indexConsumer := stream.NewArrayConsumer[string]()
+	// MergePartialIndex(tempDir, indexProducer, indexConsumer)
+
+	// outFile := indexConsumer.Collect()[0]
+	// outDiskIndex, err := ReadFilePartialIndex(outFile)
+	// require.NoError(t, err)
+
 }

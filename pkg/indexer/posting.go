@@ -1,6 +1,9 @@
 package indexer
 
 import (
+	"cmp"
+	"errors"
+	"fmt"
 	"io"
 	"iter"
 	"log"
@@ -8,11 +11,14 @@ import (
 	"petersearch/pkg/parser"
 )
 
+var ErrPostingTypeEnd = errors.New("posting list ends")
+
 type PostingType int
 
 const (
 	PostingTypeText PostingType = iota
 	PostingTypeTag
+	PostingTypeEnd
 )
 
 type Posting struct {
@@ -20,6 +26,10 @@ type Posting struct {
 	DocID int
 	Tag   string
 	Pos   int
+}
+
+func (p Posting) ID() string {
+	return fmt.Sprintf("%d-%d-%s-%d", p.Type, p.DocID, p.Tag, p.Pos)
 }
 
 func ParsePostings(doc parser.Doc, index PartialIndex, docStats *DocStats) {
@@ -36,11 +46,13 @@ func ParsePostings(doc parser.Doc, index PartialIndex, docStats *DocStats) {
 	}
 
 	for tag, tokens := range doc.TagMap {
+		pos := 0
 		for _, token := range tokens {
 			posting := Posting{
 				Type:  PostingTypeTag,
 				DocID: doc.ID,
 				Tag:   tag,
+				Pos:   pos,
 			}
 			index[token] = append(index[token], posting)
 			docStats.AddTerm(doc.ID, token)
@@ -55,6 +67,9 @@ func ReadPosting(br *ByteReader) (Posting, error) {
 	pType, err := br.ReadInt()
 	if err != nil {
 		return posting, err
+	}
+	if pType == int(PostingTypeEnd) {
+		return posting, ErrPostingTypeEnd
 	}
 	posting.Type = PostingType(pType)
 
@@ -99,11 +114,14 @@ func WritePosting(bw *ByteWriter, posting Posting) error {
 	return nil
 }
 
-func PostingsIterator(br *ByteReader, length int) iter.Seq2[int, Posting] {
-	count := 0
+func PostingsIterator(br *ByteReader) iter.Seq2[int, Posting] {
 	return func(yield func(int, Posting) bool) {
-		for range length {
+		count := 0
+		for {
 			posting, err := ReadPosting(br)
+			if err == ErrPostingTypeEnd {
+				break
+			}
 			if err != nil {
 				log.Fatalf("failed to read posting: %v", err)
 			}
@@ -115,9 +133,40 @@ func PostingsIterator(br *ByteReader, length int) iter.Seq2[int, Posting] {
 	}
 }
 
+func SortPostingsComparator() func(Posting, Posting) int {
+	type Comparator func(Posting, Posting) int
+
+	compareType := func(p1, p2 Posting) int {
+		return cmp.Compare(p1.Type, p2.Type)
+	}
+	compareDocID := func(p1, p2 Posting) int {
+		return cmp.Compare(p1.DocID, p2.DocID)
+	}
+	compareTag := func(p1, p2 Posting) int {
+		return cmp.Compare(p1.Tag, p2.Tag)
+	}
+	comparePos := func(p1, p2 Posting) int {
+		return cmp.Compare(p1.Pos, p2.Pos)
+	}
+
+	return func(p1, p2 Posting) int {
+		comparators := []Comparator{compareType, compareDocID, compareTag, comparePos}
+		for _, comp := range comparators {
+			if r := comp(p1, p2); r != 0 {
+				return r
+			}
+		}
+		return 0
+	}
+}
+
+type InvertedList struct {
+	Term     string
+	Postings []Posting
+}
+
 type InvertedListIter struct {
-	Term   string
-	Length int
+	Term string
 	// PostingIter iter.Seq2[int, Posting]
 	Next func() (int, Posting, bool)
 	Stop func()
@@ -131,13 +180,7 @@ func ReadInvertedList(br *ByteReader) (InvertedListIter, error) {
 	}
 	list.Term = term
 
-	length, err := br.ReadInt()
-	if err != nil {
-		return list, err
-	}
-	list.Length = length
-
-	postingIter := PostingsIterator(br, length)
+	postingIter := PostingsIterator(br)
 	next, stop := iter.Pull2(postingIter)
 	list.Next = next
 	list.Stop = stop
@@ -145,23 +188,44 @@ func ReadInvertedList(br *ByteReader) (InvertedListIter, error) {
 	return list, nil
 }
 
-func InvertedListIterator(fileName string) iter.Seq2[int, InvertedListIter] {
+func InvertedListIterator(term string, postings []Posting) InvertedListIter {
+	var listIter InvertedListIter
+	listIter.Term = term
+
+	iterFunc := func(yield func(int, Posting) bool) {
+		count := 0
+		for _, posting := range postings {
+			if !yield(count, posting) {
+				return
+			}
+			count++
+		}
+	}
+
+	next, stop := iter.Pull2(iterFunc)
+	listIter.Next = next
+	listIter.Stop = stop
+
+	return listIter
+}
+
+func FileInvertedListIterator(fileName string) iter.Seq2[int, InvertedListIter] {
 	f, err := os.Open(fileName)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("failed to open file:", err)
 	}
-	defer f.Close()
 
 	count := 0
 	br := NewByteReader(NewBufferedReadCloser(f))
 	return func(yield func(int, InvertedListIter) bool) {
+		defer f.Close()
 		for {
 			list, err := ReadInvertedList(br)
 			if err == io.EOF {
 				break
 			}
 			if err != nil {
-				log.Fatal(f)
+				log.Fatal("failed to read inverted list:", err)
 			}
 			if !yield(count, list) {
 				return
