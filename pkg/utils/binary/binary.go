@@ -1,4 +1,4 @@
-package indexer
+package binary
 
 import (
 	"bufio"
@@ -7,8 +7,9 @@ import (
 )
 
 type BufferedWriteCloser struct {
-	w  *bufio.Writer
-	wc io.WriteCloser
+	w     *bufio.Writer
+	wc    io.WriteCloser
+	count int
 }
 
 func NewBufferedWriteCloser(w io.WriteCloser) *BufferedWriteCloser {
@@ -18,11 +19,16 @@ func NewBufferedWriteCloser(w io.WriteCloser) *BufferedWriteCloser {
 	}
 }
 
+func (bw *BufferedWriteCloser) Total() int {
+	return bw.count
+}
+
 func (bw *BufferedWriteCloser) Buffered() int {
 	return bw.w.Buffered()
 }
 
 func (bw *BufferedWriteCloser) Write(p []byte) (n int, err error) {
+	bw.count += len(p)
 	return bw.w.Write(p)
 }
 
@@ -65,6 +71,10 @@ func NewByteWriter(w io.WriteCloser) *ByteWriter {
 	}
 }
 
+func NewBufferedByteWriter(w io.WriteCloser) *ByteWriter {
+	return NewByteWriter(NewBufferedWriteCloser(w))
+}
+
 func (bw *ByteWriter) WriteBytes(b []byte) error {
 	var err error
 	err = binary.Write(bw.w, binary.LittleEndian, int64(len(b)))
@@ -95,6 +105,10 @@ func NewByteReader(r io.ReadCloser) *ByteReader {
 	return &ByteReader{
 		r: r,
 	}
+}
+
+func NewBufferedByteReader(r io.ReadCloser) *ByteReader {
+	return NewByteReader(NewBufferedReadCloser(r))
 }
 
 func (br *ByteReader) ReadBytes() ([]byte, error) {

@@ -4,6 +4,7 @@ import (
 	"iter"
 	"log"
 	"os"
+	"petersearch/pkg/utils/binary"
 	"petersearch/pkg/utils/stream"
 	"slices"
 
@@ -220,7 +221,7 @@ func MergePartialIndex(dir string, producer stream.Producer, consumer stream.Con
 			}
 			defer outFile.Close()
 
-			bw := NewByteWriter(NewBufferedWriteCloser(outFile))
+			bw := binary.NewBufferedByteWriter(outFile)
 
 			outIter := KwayMergeReader(indexIters)
 			defer outIter.Stop()
@@ -253,52 +254,3 @@ func MergePartialIndex(dir string, producer stream.Producer, consumer stream.Con
 		consumer.Consume(outName)
 	}
 }
-
-// func ExternalMergePartialIndex(tempDir string, workers int, producer stream.Producer, consumer stream.Consumer) {
-// 	mergeWorker := func(in <-chan []string, out chan<- string) {
-// 		for fileNames := range in {
-// 			name1, name2 := fileNames[0], fileNames[1]
-// 			f1, err := os.Open(name1)
-// 			if err != nil {
-// 				log.Fatal(err)
-// 			}
-// 			f2, err := os.Open(name2)
-// 			if err != nil {
-// 				log.Fatal(err)
-// 			}
-
-// 			br1 := NewByteReader(f1)
-// 			br2 := NewByteReader(f2)
-// 			index1, err := ReadPartialIndex(br1)
-// 			if err != nil {
-// 				log.Fatal(err)
-// 			}
-// 			index2, err := ReadPartialIndex(br2)
-// 			if err != nil {
-// 				log.Fatal(err)
-// 			}
-
-// 			outF, err := os.CreateTemp(tempDir, "partial-index")
-// 			if err != nil {
-// 				log.Fatal(err)
-// 			}
-// 			bw := NewByteWriter(outF)
-
-// 		}
-// 	}
-
-// 	sendCh := make(chan []string)
-// 	recvCh := make(chan string)
-
-// 	for range workers {
-// 		go mergeWorker(sendCh, recvCh)
-// 	}
-
-// 	for {
-// 		v, ok := producer.Produce()
-// 		if !ok {
-// 			break
-// 		}
-
-// 	}
-// }

@@ -6,3 +6,8 @@ bin/indexer/trace.out
 bin/indexer/index
 bin/parser/parser
 pkg/indexer/testdir
+*.index/
+bin/index/*index
+bin/index/index*
+pkg/engine/*.index
+pkg/engine/index*

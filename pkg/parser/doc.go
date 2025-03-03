@@ -80,6 +80,7 @@ func ReadRawDoc(file string) (RawDoc, error) {
 		log.Printf("failed to open file: %s\n", file)
 		return rawDoc, err
 	}
+	defer f.Close()
 
 	b, err := io.ReadAll(f)
 	if err != nil {
@@ -108,6 +109,7 @@ func ParseDirDocs(rawFiles []string, workerNum int, consumer stream.Consumer) er
 		for files := range in {
 			rawDocs := ReadRawDocs(files)
 			docs := ParseDocs(rawDocs)
+			// newDocs := docs
 			newDocs := []Doc{}
 			for _, doc := range docs {
 				// hash := simhash.Simhash(simhash.NewWordFeatureSet([]byte(strings.Join(doc.Tokens, " ")))) & binmask
@@ -121,7 +123,7 @@ func ParseDirDocs(rawFiles []string, workerNum int, consumer stream.Consumer) er
 	}
 
 	fileCh := make(chan []string)
-	docCh := make(chan []Doc, workerNum)
+	docCh := make(chan []Doc)
 
 	var wg sync.WaitGroup
 	wg.Add(workerNum)
@@ -177,6 +179,7 @@ func ParseDocs(rawDocs []RawDoc) []Doc {
 func ParseDoc(rawDoc RawDoc) Doc {
 	content := Sanitize(rawDoc.Content)
 	tokens := ParseTokens(content)
+	tokens = StemTokens(tokens)
 	rawTagMap := ExtractTagMap(rawDoc.Content)
 	tagMap := ParseTagMap(rawTagMap)
 	return Doc{
@@ -184,4 +187,11 @@ func ParseDoc(rawDoc RawDoc) Doc {
 		Tokens: tokens,
 		TagMap: tagMap,
 	}
+}
+
+func ParseQuery(query string) []string {
+	query = Sanitize(query)
+	tokens := ParseTokens(query)
+	tokens = StemTokens(tokens)
+	return tokens
 }

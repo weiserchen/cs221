@@ -9,6 +9,7 @@ import (
 	xhtml "golang.org/x/net/html"
 
 	"github.com/microcosm-cc/bluemonday"
+	"github.com/surgebase/porter2"
 )
 
 func ExtractTagMap(s string) map[string][]string {
@@ -54,7 +55,9 @@ func Sanitize(s string) string {
 	content = html.UnescapeString(content)
 	var sb strings.Builder
 	for _, r := range content {
-		if !unicode.IsPunct(r) {
+		if unicode.IsPunct(r) {
+			sb.WriteRune(' ')
+		} else {
 			sb.WriteRune(r)
 		}
 	}
@@ -77,4 +80,12 @@ func ParseTagMap(tagMap map[string][]string) map[string][]string {
 		}
 	}
 	return tokenMap
+}
+
+func StemTokens(tokens []string) []string {
+	stemmed := make([]string, 0, len(tokens))
+	for _, token := range tokens {
+		stemmed = append(stemmed, porter2.Stem(token))
+	}
+	return stemmed
 }

@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"petersearch/pkg/parser"
+	"petersearch/pkg/utils/binary"
 )
 
 var ErrPostingTypeEnd = errors.New("posting list ends")
@@ -32,7 +33,11 @@ func (p Posting) ID() string {
 	return fmt.Sprintf("%d-%d-%s-%d", p.Type, p.DocID, p.Tag, p.Pos)
 }
 
-func ParsePostings(doc parser.Doc, index PartialIndex, docStats *DocStats) {
+func (p Posting) Size() int {
+	return 8*4 + len(p.Tag)
+}
+
+func ParsePostings(doc parser.Doc, index PartialIndex, stats *IndexStats) {
 	pos := 0
 	for _, token := range doc.Tokens {
 		posting := Posting{
@@ -41,7 +46,7 @@ func ParsePostings(doc parser.Doc, index PartialIndex, docStats *DocStats) {
 			Pos:   pos,
 		}
 		index[token] = append(index[token], posting)
-		docStats.AddTerm(doc.ID, token)
+		stats.AddTerm(doc.ID, token)
 		pos++
 	}
 
@@ -55,13 +60,13 @@ func ParsePostings(doc parser.Doc, index PartialIndex, docStats *DocStats) {
 				Pos:   pos,
 			}
 			index[token] = append(index[token], posting)
-			docStats.AddTerm(doc.ID, token)
+			stats.AddTerm(doc.ID, token)
 			pos++
 		}
 	}
 }
 
-func ReadPosting(br *ByteReader) (Posting, error) {
+func ReadPosting(br *binary.ByteReader) (Posting, error) {
 	var posting Posting
 
 	pType, err := br.ReadInt()
@@ -96,7 +101,7 @@ func ReadPosting(br *ByteReader) (Posting, error) {
 	return posting, nil
 }
 
-func WritePosting(bw *ByteWriter, posting Posting) error {
+func WritePosting(bw *binary.ByteWriter, posting Posting) error {
 	if err := bw.WriteInt(int(posting.Type)); err != nil {
 		return err
 	}
@@ -114,7 +119,7 @@ func WritePosting(bw *ByteWriter, posting Posting) error {
 	return nil
 }
 
-func PostingsIterator(br *ByteReader) iter.Seq2[int, Posting] {
+func PostingsIterator(br *binary.ByteReader) iter.Seq2[int, Posting] {
 	return func(yield func(int, Posting) bool) {
 		count := 0
 		for {
@@ -203,7 +208,7 @@ func CollectInvertedList(listIter InvertedListIter) []Posting {
 	return postings
 }
 
-func ReadInvertedList(br *ByteReader) (InvertedListIter, error) {
+func ReadInvertedList(br *binary.ByteReader) (InvertedListIter, error) {
 	var list InvertedListIter
 	term, err := br.ReadString()
 	if err != nil {
@@ -247,7 +252,7 @@ func FileInvertedListIterator(fileName string) iter.Seq2[int, InvertedListIter] 
 	}
 
 	count := 0
-	br := NewByteReader(NewBufferedReadCloser(f))
+	br := binary.NewBufferedByteReader(f)
 	return func(yield func(int, InvertedListIter) bool) {
 		defer f.Close()
 		for {

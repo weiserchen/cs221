@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"petersearch/pkg/parser"
+	"petersearch/pkg/utils/binary"
 	"petersearch/pkg/utils/stream"
 	"sort"
 	"testing"
@@ -11,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func testParseFiles(t *testing.T, workers, total, batch int) ([]PartialIndex, DocStats) {
+func testParseFiles(t *testing.T, workers, total, batch int) ([]PartialIndex, IndexStats) {
 	t.Helper()
 
 	srcDir := "../../DEV"
@@ -33,7 +34,7 @@ func testParseFiles(t *testing.T, workers, total, batch int) ([]PartialIndex, Do
 
 	docProducer := stream.NewArrayProducer(docs)
 	indexConsumer := stream.NewArrayConsumer[PartialIndex]()
-	statsConsumer := stream.NewArrayConsumer[*DocStats]()
+	statsConsumer := stream.NewArrayConsumer[*IndexStats]()
 	waitCh := make(chan struct{})
 
 	go func() {
@@ -93,13 +94,13 @@ func TestBinaryReadWrite(t *testing.T) {
 		file, err := os.CreateTemp(tempDir, "bin")
 		fileName := file.Name()
 		require.NoError(t, err)
-		bw := NewByteWriter(NewBufferedWriteCloser(file))
+		bw := binary.NewBufferedByteWriter(file)
 		WritePartialIndex(bw, index)
 		bw.Close()
 
 		f, err := os.Open(fileName)
 		require.NoError(t, err)
-		br := NewByteReader(NewBufferedReadCloser(f))
+		br := binary.NewBufferedByteReader(f)
 		storedIndex, err := ReadPartialIndex(br)
 		require.NoError(t, err)
 
@@ -197,7 +198,7 @@ func TestKwayMergeReaderWriter(t *testing.T) {
 
 	file, err := os.CreateTemp(tempDir, "index")
 	require.NoError(t, err)
-	bw := NewByteWriter(NewBufferedWriteCloser(file))
+	bw := binary.NewBufferedByteWriter(file)
 	err = WritePartialIndex(bw, inMemoryIndex)
 	require.NoError(t, err)
 	bw.Close()
