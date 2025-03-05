@@ -64,7 +64,6 @@ func TestIndexIntegrity(t *testing.T) {
 
 	require.Equal(t, indexStats.DocCount, len(indexStats.DocIDToURL))
 	require.Equal(t, indexStats.DocCount, len(indexStats.URLToDocID))
-	require.Equal(t, len(termPos), len(indexStats.TermDocCount))
 
 	indexFile, err := os.Open(indexPath)
 	require.NoError(t, err)

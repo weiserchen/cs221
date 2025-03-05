@@ -6,11 +6,19 @@ import (
 	"os"
 	"path"
 	"petersearch/pkg/indexer"
+	"petersearch/pkg/parser"
 )
+
+type ResultDoc struct {
+	DocID  int
+	DocURL string
+	Score  float64
+}
 
 type Engine struct {
 	IndexPath  string
 	IndexStats indexer.IndexStats
+	Ranker     *Ranker
 	TermPos    map[string]int
 	Cache      IndexListCache
 	cacheSize  int
@@ -35,6 +43,7 @@ func NewEngine(srcDir string, cacheSize int, workers int) *Engine {
 	}
 	statsDecoder := gob.NewDecoder(statsFile)
 	statsDecoder.Decode(&engine.IndexStats)
+	engine.Ranker = NewRanker(&engine.IndexStats)
 
 	posFile, err := os.Open(posPath)
 	if err != nil {
@@ -51,18 +60,57 @@ func NewEngine(srcDir string, cacheSize int, workers int) *Engine {
 }
 
 // empty string if not found
-func (eg *Engine) DocURL(docID int) string {
-	u, ok := eg.IndexStats.DocIDToURL[docID]
+func (ng *Engine) DocURL(docID int) string {
+	u, ok := ng.IndexStats.DocIDToURL[docID]
 	if !ok {
 		return ""
 	}
 	return u
 }
 
-func (eg *Engine) DocURLs(docIDs []int) []string {
+func (ng *Engine) DocURLs(docIDs []int) []string {
 	urls := make([]string, 0, len(docIDs))
 	for _, id := range docIDs {
-		urls = append(urls, eg.DocURL(id))
+		urls = append(urls, ng.DocURL(id))
 	}
 	return urls
+}
+
+func (ng *Engine) Process(query string, k int) ([]ResultDoc, error) {
+	var result []ResultDoc
+
+	terms := parser.ParseQuery(query)
+	log.Println(terms)
+	docStats := []*DocStats{}
+
+	for _, term := range terms {
+		list, err := ng.Cache.Get(term)
+		if err != nil {
+			return result, err
+		}
+		stats := NewDocStats()
+		for _, posting := range list.Postings {
+			stats.AddTerm(posting.DocID, term)
+		}
+		docStats = append(docStats, stats)
+	}
+
+	mergedStats := MergeDocStats(docStats...)
+	scores := ng.Ranker.TFIDF(terms, mergedStats)
+	scores = TopK(scores, k)
+
+	result = make([]ResultDoc, 0, len(scores))
+	for _, score := range scores {
+		result = append(result, ResultDoc{
+			DocID:  score.DocID,
+			Score:  score.Value,
+			DocURL: ng.DocURL(score.DocID),
+		})
+	}
+
+	return result, nil
+}
+
+func (ng *Engine) Run() {
+
 }

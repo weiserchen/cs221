@@ -15,7 +15,8 @@ func main() {
 	}()
 
 	batch := 100
-	tasks := 100
+	// tasks := 100
+	tasks := -1
 	workers := 4
 	srcDir := "../../DEV"
 	dstDir := "../../.index"
