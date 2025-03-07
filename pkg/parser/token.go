@@ -89,3 +89,27 @@ func StemTokens(tokens []string) []string {
 	}
 	return stemmed
 }
+
+func TwoGrams(tokens []string) []string {
+	twoGrams := []string{}
+	for i := 0; i < len(tokens)-1; i++ {
+		twoGrams = append(twoGrams, strings.Join([]string{tokens[i], tokens[i+1]}, "+"))
+	}
+	return twoGrams
+}
+
+func ThreeGrams(tokens []string) []string {
+	threeGrams := []string{}
+	for i := 0; i < len(tokens)-2; i++ {
+		threeGrams = append(threeGrams, strings.Join([]string{tokens[i], tokens[i+1], tokens[i+2]}, "+"))
+	}
+	return threeGrams
+}
+
+func FourGrams(tokens []string) []string {
+	fourGrams := []string{}
+	for i := 0; i < len(tokens)-3; i++ {
+		fourGrams = append(fourGrams, strings.Join([]string{tokens[i], tokens[i+1], tokens[i+2], tokens[i+3]}, "+"))
+	}
+	return fourGrams
+}

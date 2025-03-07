@@ -93,6 +93,18 @@ func (bw *ByteWriter) WriteInt(i int) error {
 	return binary.Write(bw.w, binary.LittleEndian, int64(i))
 }
 
+func (bw *ByteWriter) WriteUInt64(i uint64) error {
+	return binary.Write(bw.w, binary.LittleEndian, i)
+}
+
+func (bw *ByteWriter) WriteUInt16(i uint16) error {
+	return binary.Write(bw.w, binary.LittleEndian, i)
+}
+
+func (bw *ByteWriter) WriteUInt8(i uint8) error {
+	return binary.Write(bw.w, binary.LittleEndian, i)
+}
+
 func (bw *ByteWriter) Close() error {
 	return bw.w.Close()
 }
@@ -135,6 +147,24 @@ func (br *ByteReader) ReadInt() (int, error) {
 	var i int64
 	err := binary.Read(br.r, binary.LittleEndian, &i)
 	return int(i), err
+}
+
+func (br *ByteReader) ReadUInt64() (uint64, error) {
+	var i uint64
+	err := binary.Read(br.r, binary.LittleEndian, &i)
+	return i, err
+}
+
+func (br *ByteReader) ReadUInt16() (uint16, error) {
+	var i uint16
+	err := binary.Read(br.r, binary.LittleEndian, &i)
+	return i, err
+}
+
+func (br *ByteReader) ReadUint8() (uint8, error) {
+	var i uint8
+	err := binary.Read(br.r, binary.LittleEndian, &i)
+	return i, err
 }
 
 func (br *ByteReader) Close() error {

@@ -10,7 +10,7 @@ import (
 )
 
 type ResultDoc struct {
-	DocID  int
+	DocID  uint64
 	DocURL string
 	Score  float64
 }
@@ -60,7 +60,7 @@ func NewEngine(srcDir string, cacheSize int, workers int) *Engine {
 }
 
 // empty string if not found
-func (ng *Engine) DocURL(docID int) string {
+func (ng *Engine) DocURL(docID uint64) string {
 	u, ok := ng.IndexStats.DocIDToURL[docID]
 	if !ok {
 		return ""
@@ -68,7 +68,7 @@ func (ng *Engine) DocURL(docID int) string {
 	return u
 }
 
-func (ng *Engine) DocURLs(docIDs []int) []string {
+func (ng *Engine) DocURLs(docIDs []uint64) []string {
 	urls := make([]string, 0, len(docIDs))
 	for _, id := range docIDs {
 		urls = append(urls, ng.DocURL(id))

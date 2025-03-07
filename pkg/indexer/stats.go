@@ -4,16 +4,16 @@ import "petersearch/pkg/parser"
 
 type IndexStats struct {
 	DocCount     int
-	DocIDToURL   map[int]string
-	URLToDocID   map[string]int
-	DocTermCount map[int]int
+	DocIDToURL   map[uint64]string
+	URLToDocID   map[string]uint64
+	DocTermCount map[uint64]int
 }
 
 func NewIndexStats() *IndexStats {
 	return &IndexStats{
-		DocIDToURL:   map[int]string{},
-		URLToDocID:   map[string]int{},
-		DocTermCount: map[int]int{},
+		DocIDToURL:   map[uint64]string{},
+		URLToDocID:   map[string]uint64{},
+		DocTermCount: map[uint64]int{},
 	}
 }
 
@@ -23,10 +23,10 @@ func (stats *IndexStats) AddDoc(doc parser.Doc) {
 	stats.URLToDocID[doc.URL] = doc.ID
 }
 
-func (stats *IndexStats) AddTerm(docID int, term string) {
+func (stats *IndexStats) AddTerm(docID uint64, term string) {
 	stats.DocTermCount[docID]++
 }
 
-func (stats *IndexStats) DocLen(docID int) int {
+func (stats *IndexStats) DocLen(docID uint64) int {
 	return stats.DocTermCount[docID]
 }

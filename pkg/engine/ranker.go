@@ -8,45 +8,45 @@ import (
 
 type DocStats struct {
 	// DocID -> Term -> Count
-	TermFreqs map[int]map[string]int
+	TermFreqs map[uint64]map[string]int
 	// Term -> DocID -> ok
-	DocFreqs map[string]map[int]struct{}
+	DocFreqs map[string]map[uint64]struct{}
 }
 
 func NewDocStats() *DocStats {
 	return &DocStats{
-		TermFreqs: map[int]map[string]int{},
-		DocFreqs:  map[string]map[int]struct{}{},
+		TermFreqs: map[uint64]map[string]int{},
+		DocFreqs:  map[string]map[uint64]struct{}{},
 	}
 }
 
-func (stats *DocStats) AddTerm(docID int, term string) {
+func (stats *DocStats) AddTerm(docID uint64, term string) {
 	if _, ok := stats.TermFreqs[docID]; !ok {
 		stats.TermFreqs[docID] = map[string]int{}
 	}
 	stats.TermFreqs[docID][term]++
 
 	if _, ok := stats.DocFreqs[term]; !ok {
-		stats.DocFreqs[term] = map[int]struct{}{}
+		stats.DocFreqs[term] = map[uint64]struct{}{}
 	}
 	stats.DocFreqs[term][docID] = struct{}{}
 }
 
-func (stats *DocStats) AddTermCount(docID int, term string, count int) {
+func (stats *DocStats) AddTermCount(docID uint64, term string, count int) {
 	if _, ok := stats.TermFreqs[docID]; !ok {
 		stats.TermFreqs[docID] = map[string]int{}
 	}
 	stats.TermFreqs[docID][term] += count
 }
 
-func (stats *DocStats) AddDocFreq(docID int, term string) {
+func (stats *DocStats) AddDocFreq(docID uint64, term string) {
 	if _, ok := stats.DocFreqs[term]; !ok {
-		stats.DocFreqs[term] = map[int]struct{}{}
+		stats.DocFreqs[term] = map[uint64]struct{}{}
 	}
 	stats.DocFreqs[term][docID] = struct{}{}
 }
 
-func (stats *DocStats) TermCount(docID int, term string) int {
+func (stats *DocStats) TermCount(docID uint64, term string) int {
 	if _, ok := stats.TermFreqs[docID]; !ok {
 		return 0
 	}
@@ -85,7 +85,7 @@ func MergeDocStats(docStats ...*DocStats) *DocStats {
 }
 
 type Score struct {
-	DocID int
+	DocID uint64
 	Value float64
 }
 
@@ -101,7 +101,7 @@ func NewRanker(indexStats *indexer.IndexStats) *Ranker {
 
 func (r *Ranker) TFIDF(terms []string, docStats *DocStats) []Score {
 	// DocID -> score
-	scoreMap := map[int]float64{}
+	scoreMap := map[uint64]float64{}
 
 	totalDocCount := float64(r.indexStats.DocCount)
 	for docID := range docStats.TermFreqs {

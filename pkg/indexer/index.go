@@ -138,7 +138,7 @@ func WritePartialIndex(bw *binary.ByteWriter, index PartialIndex) error {
 		for _, posting := range postings {
 			WritePosting(bw, posting)
 		}
-		if err := bw.WriteInt(int(PostingTypeEnd)); err != nil {
+		if err := bw.WriteUInt8(uint8(PostingTypeEnd)); err != nil {
 			return err
 		}
 	}
@@ -315,7 +315,7 @@ func BuildIndex(batch, tasks, workers int, srcDir, dstDir string) {
 			}
 		}
 
-		if err := bw.WriteInt(int(PostingTypeEnd)); err != nil {
+		if err := bw.WriteUInt8(uint8(PostingTypeEnd)); err != nil {
 			log.Fatalf("failed to write end mark in out file: %v\n", err)
 		}
 

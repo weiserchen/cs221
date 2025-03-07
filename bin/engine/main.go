@@ -13,7 +13,11 @@ func main() {
 	workers := 4
 	k := 20
 
+	log.Println("Engine initialization started...")
+
 	ng := engine.NewEngine(indexDir, cacheSize, workers)
+
+	log.Println("Engine initialization completed...")
 
 	rawQueries := []string{
 		"Iftekhar ahmed",

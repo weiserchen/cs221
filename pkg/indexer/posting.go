@@ -14,19 +14,33 @@ import (
 
 var ErrPostingTypeEnd = errors.New("posting list ends")
 
-type PostingType int
+type PostingType uint8
 
 const (
-	PostingTypeText PostingType = iota
+	PostingTypeUniGram PostingType = iota
+	PostingTypeTwoGram
+	PostingTypeThreeGram
 	PostingTypeTag
 	PostingTypeEnd
 )
 
+type PostingTag uint8
+
+const (
+	PostingTagEmtpy PostingTag = iota
+	PostingTagTitle
+	PostingTagH1
+	PostingTagH2
+	PostingTagH3
+	PostingTagB
+	PostingTagI
+)
+
 type Posting struct {
 	Type  PostingType
-	DocID int
+	DocID uint64
 	Tag   string
-	Pos   int
+	Pos   uint16
 }
 
 func (p Posting) ID() string {
@@ -37,11 +51,74 @@ func (p Posting) Size() int {
 	return 8*4 + len(p.Tag)
 }
 
+func ConvertFromTagString(s string) PostingTag {
+	switch s {
+	case "title":
+		return PostingTagTitle
+	case "h1":
+		return PostingTagH1
+	case "h2":
+		return PostingTagH2
+	case "h3":
+		return PostingTagH3
+	case "b":
+		return PostingTagB
+	case "i":
+		return PostingTagI
+	default:
+		return PostingTagEmtpy
+	}
+}
+
+func ConvertToTagString(tag PostingTag) string {
+	switch tag {
+	case PostingTagTitle:
+		return "title"
+	case PostingTagH1:
+		return "h1"
+	case PostingTagH2:
+		return "h2"
+	case PostingTagH3:
+		return "h3"
+	case PostingTagB:
+		return "b"
+	case PostingTagI:
+		return "i"
+	default:
+		return ""
+	}
+}
+
 func ParsePostings(doc parser.Doc, index PartialIndex, stats *IndexStats) {
-	pos := 0
+	var pos uint16
+
 	for _, token := range doc.Tokens {
 		posting := Posting{
-			Type:  PostingTypeText,
+			Type:  PostingTypeUniGram,
+			DocID: doc.ID,
+			Pos:   pos,
+		}
+		index[token] = append(index[token], posting)
+		stats.AddTerm(doc.ID, token)
+		pos++
+	}
+
+	pos = 0
+	for _, token := range doc.TwoGrams {
+		posting := Posting{
+			Type:  PostingTypeTwoGram,
+			DocID: doc.ID,
+			Pos:   pos,
+		}
+		index[token] = append(index[token], posting)
+		stats.AddTerm(doc.ID, token)
+		pos++
+	}
+
+	pos = 0
+	for _, token := range doc.ThreeGrams {
+		posting := Posting{
+			Type:  PostingTypeThreeGram,
 			DocID: doc.ID,
 			Pos:   pos,
 		}
@@ -51,7 +128,7 @@ func ParsePostings(doc parser.Doc, index PartialIndex, stats *IndexStats) {
 	}
 
 	for tag, tokens := range doc.TagMap {
-		pos := 0
+		pos = 0
 		for _, token := range tokens {
 			posting := Posting{
 				Type:  PostingTypeTag,
@@ -69,30 +146,31 @@ func ParsePostings(doc parser.Doc, index PartialIndex, stats *IndexStats) {
 func ReadPosting(br *binary.ByteReader) (Posting, error) {
 	var posting Posting
 
-	pType, err := br.ReadInt()
+	pType, err := br.ReadUint8()
 	if err != nil {
 		return posting, err
 	}
-	if pType == int(PostingTypeEnd) {
+	if pType == uint8(PostingTypeEnd) {
 		return posting, ErrPostingTypeEnd
 	}
 	posting.Type = PostingType(pType)
 
-	pDocID, err := br.ReadInt()
+	pDocID, err := br.ReadUInt64()
 	if err != nil {
 		return posting, err
 	}
 	posting.DocID = pDocID
 
 	if posting.Type == PostingTypeTag {
-		pTag, err := br.ReadString()
+		tag, err := br.ReadUint8()
 		if err != nil {
 			return posting, err
 		}
+		pTag := ConvertToTagString(PostingTag(tag))
 		posting.Tag = pTag
 	}
 
-	pPos, err := br.ReadInt()
+	pPos, err := br.ReadUInt16()
 	if err != nil {
 		return posting, err
 	}
@@ -102,18 +180,21 @@ func ReadPosting(br *binary.ByteReader) (Posting, error) {
 }
 
 func WritePosting(bw *binary.ByteWriter, posting Posting) error {
-	if err := bw.WriteInt(int(posting.Type)); err != nil {
+	if err := bw.WriteUInt8(uint8(posting.Type)); err != nil {
 		return err
 	}
-	if err := bw.WriteInt(posting.DocID); err != nil {
+	if err := bw.WriteUInt64(posting.DocID); err != nil {
 		return err
 	}
 	if posting.Type == PostingTypeTag {
-		if err := bw.WriteString(posting.Tag); err != nil {
-			return err
+		tag := ConvertFromTagString(posting.Tag)
+		if tag != PostingTagEmtpy {
+			if err := bw.WriteUInt8(uint8(tag)); err != nil {
+				return err
+			}
 		}
 	}
-	if err := bw.WriteInt(posting.Pos); err != nil {
+	if err := bw.WriteUInt16(posting.Pos); err != nil {
 		return err
 	}
 	return nil

@@ -1,6 +1,7 @@
 package parser
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,6 +17,20 @@ import (
 	"github.com/mfonda/simhash"
 )
 
+var stopwords map[string]struct{}
+
+//go:embed stopwords.txt
+var stopwordsStr string
+
+func init() {
+	stopwords = map[string]struct{}{}
+
+	words := strings.Fields(stopwordsStr)
+	for _, word := range words {
+		stopwords[word] = struct{}{}
+	}
+}
+
 type RawDoc struct {
 	URL      string `json:"url"`
 	Content  string `json:"content"`
@@ -23,10 +38,12 @@ type RawDoc struct {
 }
 
 type Doc struct {
-	ID     int
-	URL    string
-	Tokens []string
-	TagMap map[string][]string
+	ID         uint64
+	URL        string
+	Tokens     []string
+	TwoGrams   []string
+	ThreeGrams []string
+	TagMap     map[string][]string
 }
 
 func (doc *Doc) Print() {
@@ -112,6 +129,9 @@ func ParseDirDocs(rawFiles []string, workerNum int, consumer stream.Consumer) er
 			// newDocs := docs
 			newDocs := []Doc{}
 			for _, doc := range docs {
+				if !FilterDoc(doc) {
+					continue
+				}
 				// hash := simhash.Simhash(simhash.NewWordFeatureSet([]byte(strings.Join(doc.Tokens, " ")))) & binmask
 				hash := simhash.Simhash(simhash.NewWordFeatureSet([]byte(strings.Join(doc.Tokens, " "))))
 				if _, ok := dupMap.LoadOrStore(hash, struct{}{}); !ok {
@@ -153,7 +173,7 @@ func ParseDirDocs(rawFiles []string, workerNum int, consumer stream.Consumer) er
 		log.Println("Parse phase completed.")
 	}()
 
-	docID := 0
+	var docID uint64
 	for docs := range docCh {
 		for _, doc := range docs {
 			doc.ID = docID
@@ -171,21 +191,34 @@ func ParseDirDocs(rawFiles []string, workerNum int, consumer stream.Consumer) er
 func ParseDocs(rawDocs []RawDoc) []Doc {
 	docs := []Doc{}
 	for _, rawDoc := range rawDocs {
-		docs = append(docs, ParseDoc(rawDoc))
+		doc := ParseDoc(rawDoc)
+		docs = append(docs, doc)
 	}
 	return docs
+}
+
+// true -> keep
+func FilterDoc(doc Doc) bool {
+	if len(doc.Tokens) < 100 || len(doc.Tokens) > 65000 {
+		return false
+	}
+	return true
 }
 
 func ParseDoc(rawDoc RawDoc) Doc {
 	content := Sanitize(rawDoc.Content)
 	tokens := ParseTokens(content)
 	tokens = StemTokens(tokens)
+	twoGrams := TwoGrams(tokens)
+	threeGrams := ThreeGrams(tokens)
 	rawTagMap := ExtractTagMap(rawDoc.Content)
 	tagMap := ParseTagMap(rawTagMap)
 	return Doc{
-		URL:    rawDoc.URL,
-		Tokens: tokens,
-		TagMap: tagMap,
+		URL:        rawDoc.URL,
+		Tokens:     tokens,
+		TwoGrams:   twoGrams,
+		ThreeGrams: threeGrams,
+		TagMap:     tagMap,
 	}
 }
 
@@ -193,5 +226,16 @@ func ParseQuery(query string) []string {
 	query = Sanitize(query)
 	tokens := ParseTokens(query)
 	tokens = StemTokens(tokens)
-	return tokens
+	twoGrams := TwoGrams(tokens)
+	threeGrams := ThreeGrams(tokens)
+	tokens = append(tokens, twoGrams...)
+	tokens = append(tokens, threeGrams...)
+
+	validTokens := []string{}
+	for _, token := range tokens {
+		if _, ok := stopwords[token]; !ok {
+			validTokens = append(validTokens, token)
+		}
+	}
+	return validTokens
 }
