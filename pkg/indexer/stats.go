@@ -30,3 +30,15 @@ func (stats *IndexStats) AddTerm(docID uint64, term string) {
 func (stats *IndexStats) DocLen(docID uint64) int {
 	return stats.DocTermCount[docID]
 }
+
+type PosStats struct {
+	TermStart map[string]uint64
+	TermEnd   map[string]uint64
+}
+
+func NewPosStats() *PosStats {
+	return &PosStats{
+		TermStart: map[string]uint64{},
+		TermEnd:   map[string]uint64{},
+	}
+}

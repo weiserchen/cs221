@@ -146,23 +146,38 @@ func ParsePostings(doc parser.Doc, index PartialIndex, stats *IndexStats) {
 func ReadPosting(br *binary.ByteReader) (Posting, error) {
 	var posting Posting
 
-	pType, err := br.ReadUint8()
+	pType, docIDLen, err := ReadPostingHeader(br)
 	if err != nil {
 		return posting, err
 	}
-	if pType == uint8(PostingTypeEnd) {
+	posting.Type = pType
+	if posting.Type == PostingTypeEnd {
 		return posting, ErrPostingTypeEnd
 	}
-	posting.Type = PostingType(pType)
 
-	pDocID, err := br.ReadUInt64()
+	pDocID, err := readDocID(br, docIDLen)
 	if err != nil {
 		return posting, err
 	}
 	posting.DocID = pDocID
 
+	// pType, err := br.ReadUInt8()
+	// if err != nil {
+	// 	return posting, err
+	// }
+	// posting.Type = PostingType(pType)
+	// if posting.Type == PostingTypeEnd {
+	// 	return posting, ErrPostingTypeEnd
+	// }
+
+	// pDocID, err := br.ReadUInt64()
+	// if err != nil {
+	// 	return posting, err
+	// }
+	// posting.DocID = pDocID
+
 	if posting.Type == PostingTypeTag {
-		tag, err := br.ReadUint8()
+		tag, err := br.ReadUInt8()
 		if err != nil {
 			return posting, err
 		}
@@ -179,13 +194,55 @@ func ReadPosting(br *binary.ByteReader) (Posting, error) {
 	return posting, nil
 }
 
+// PostingType, DocIDLen
+func ReadPostingHeader(br *binary.ByteReader) (PostingType, uint8, error) {
+	header, err := br.ReadUInt8()
+	if err != nil {
+		return 0, 0, err
+	}
+	pType, docIDLen := decodeHeader(header)
+	return pType, docIDLen, nil
+}
+
+func decodeHeader(header uint8) (PostingType, uint8) {
+	pType := (header >> 4) & 15
+	docIDLen := header & 15
+	return PostingType(pType), docIDLen
+}
+
+func readDocID(br *binary.ByteReader, docIDLen uint8) (uint64, error) {
+	switch docIDLen {
+	case 0:
+		docID, err := br.ReadUInt8()
+		return uint64(docID), err
+	case 1:
+		docID, err := br.ReadUInt16()
+		return uint64(docID), err
+	case 2:
+		docID, err := br.ReadUInt32()
+		return uint64(docID), err
+	default:
+		return br.ReadUInt64()
+	}
+}
+
 func WritePosting(bw *binary.ByteWriter, posting Posting) error {
-	if err := bw.WriteUInt8(uint8(posting.Type)); err != nil {
+	docIDLen, err := WritePostingHeader(bw, posting.Type, posting.DocID)
+	if err != nil {
 		return err
 	}
-	if err := bw.WriteUInt64(posting.DocID); err != nil {
+
+	if err := writeDocID(bw, docIDLen, posting.DocID); err != nil {
 		return err
 	}
+
+	// if err := bw.WriteUInt8(uint8(posting.Type)); err != nil {
+	// 	return err
+	// }
+	// if err := bw.WriteUInt64(posting.DocID); err != nil {
+	// 	return err
+	// }
+
 	if posting.Type == PostingTypeTag {
 		tag := ConvertFromTagString(posting.Tag)
 		if tag != PostingTagEmtpy {
@@ -198,6 +255,39 @@ func WritePosting(bw *binary.ByteWriter, posting Posting) error {
 		return err
 	}
 	return nil
+}
+
+func WritePostingHeader(bw *binary.ByteWriter, pType PostingType, docID uint64) (uint8, error) {
+	var docIDLen uint8
+	if docID <= 255 {
+		docIDLen = 0
+	} else if docID <= 65535 {
+		docIDLen = 1
+	} else if docID <= 4_294_967_295 {
+		docIDLen = 2
+	} else {
+		docIDLen = 3
+	}
+	// docIDLen = 3
+	header := encodeHeader(pType, docIDLen)
+	return docIDLen, bw.WriteUInt8(header)
+}
+
+func encodeHeader(pType PostingType, docIDLen uint8) uint8 {
+	return uint8(pType)<<4 + docIDLen
+}
+
+func writeDocID(bw *binary.ByteWriter, docIDLen uint8, docID uint64) error {
+	switch docIDLen {
+	case 0:
+		return bw.WriteUInt8(uint8(docID))
+	case 1:
+		return bw.WriteUInt16(uint16(docID))
+	case 2:
+		return bw.WriteUInt32(uint32(docID))
+	default:
+		return bw.WriteUInt64(docID)
+	}
 }
 
 func PostingsIterator(br *binary.ByteReader) iter.Seq2[int, Posting] {

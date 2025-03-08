@@ -15,7 +15,7 @@ func main() {
 
 	log.Println("Engine initialization started...")
 
-	ng := engine.NewEngine(indexDir, cacheSize, workers)
+	ng := engine.NewEngine(indexDir, cacheSize, workers, false)
 
 	log.Println("Engine initialization completed...")
 

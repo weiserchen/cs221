@@ -22,14 +22,15 @@ func TestCache(t *testing.T) {
 		os.RemoveAll(dstDir)
 	})
 
-	indexer.BuildIndex(batch, tasks, workers, srcDir, dstDir)
+	compress := false
+	indexer.BuildIndex(batch, tasks, workers, srcDir, dstDir, compress)
 
 	indexPath := path.Join(dstDir, "term_list")
 	statsPath := path.Join(dstDir, "term_stats")
 	posPath := path.Join(dstDir, "term_pos")
 
 	var indexStats indexer.IndexStats
-	var termPos map[string]int
+	var posStats indexer.PosStats
 
 	statsFile, err := os.Open(statsPath)
 	require.NoError(t, err)
@@ -39,7 +40,7 @@ func TestCache(t *testing.T) {
 	posFile, err := os.Open(posPath)
 	require.NoError(t, err)
 	posDecoder := gob.NewDecoder(posFile)
-	posDecoder.Decode(&termPos)
+	posDecoder.Decode(&posStats)
 
 	indexIter := indexer.FilePartialIndexIterator(indexPath)
 	memoryIndex := map[string][]indexer.Posting{}
@@ -63,7 +64,7 @@ func TestCache(t *testing.T) {
 	}
 
 	memCacheSize := 256
-	diskCache := NewDiskIndexListCache(indexPath, 4, termPos)
+	diskCache := NewDiskIndexListCache(indexPath, 4, posStats, compress)
 	memCache := NewMemoryIndexListCache(memCacheSize, diskCache)
 
 	nonExistTerm := "areallylongtermthatdoesnotexistinthecache"
@@ -84,4 +85,51 @@ func TestCache(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func TestCacheCompressed(t *testing.T) {
+	batch := 100
+	tasks := 10
+	workers := 4
+	srcDir := "../../DEV"
+	dstDir := "./cache.index"
+
+	t.Cleanup(func() {
+		os.RemoveAll(dstDir)
+	})
+
+	compress := true
+	indexer.BuildIndex(batch, tasks, workers, srcDir, dstDir, compress)
+
+	indexPath := path.Join(dstDir, "term_list")
+	statsPath := path.Join(dstDir, "term_stats")
+	posPath := path.Join(dstDir, "term_pos")
+
+	var indexStats indexer.IndexStats
+	var posStats indexer.PosStats
+
+	statsFile, err := os.Open(statsPath)
+	require.NoError(t, err)
+	statsDecoder := gob.NewDecoder(statsFile)
+	statsDecoder.Decode(&indexStats)
+
+	posFile, err := os.Open(posPath)
+	require.NoError(t, err)
+	posDecoder := gob.NewDecoder(posFile)
+	posDecoder.Decode(&posStats)
+
+	memCacheSize := 256
+	diskCache := NewDiskIndexListCache(indexPath, 4, posStats, compress)
+	memCache := NewMemoryIndexListCache(memCacheSize, diskCache)
+
+	nonExistTerm := "areallylongtermthatdoesnotexistinthecache"
+
+	_, err = memCache.Get(nonExistTerm)
+	require.Error(t, err)
+	require.Equal(t, ErrCacheEntryNotFound, err)
+
+	for term := range posStats.TermStart {
+		_, err := memCache.Get(term)
+		require.NoError(t, err)
+	}
 }

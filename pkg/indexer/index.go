@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -138,9 +139,13 @@ func WritePartialIndex(bw *binary.ByteWriter, index PartialIndex) error {
 		for _, posting := range postings {
 			WritePosting(bw, posting)
 		}
-		if err := bw.WriteUInt8(uint8(PostingTypeEnd)); err != nil {
+		if _, err := WritePostingHeader(bw, PostingTypeEnd, 0); err != nil {
 			return err
 		}
+		// if err := bw.WriteUInt8(uint8(PostingTypeEnd)); err != nil {
+		// 	return err
+		// }
+
 	}
 	return nil
 }
@@ -197,7 +202,11 @@ func SavePartialIndex(dir string, producer stream.Producer, consumer stream.Cons
 	}
 }
 
-func BuildIndex(batch, tasks, workers int, srcDir, dstDir string) {
+func BuildIndex(batch, tasks, workers int, srcDir, dstDir string, compress bool) {
+	if compress {
+		log.Fatal("unsupported option")
+	}
+
 	if err := sys.CreateDir(dstDir); err != nil {
 		log.Fatalf("failed to create dir: %v\n", err)
 	}
@@ -285,43 +294,108 @@ func BuildIndex(batch, tasks, workers int, srcDir, dstDir string) {
 	start = time.Now()
 	outIter := KwayMergeReader(indexIters)
 	postingCount := 0
-	termCount := 0
-	termPos := map[string]int{}
-	pos := 0
+	unigrams := 0
+	twograms := 0
+	threegrams := 0
+	posStats := NewPosStats()
+
+	type TermBuf struct {
+		term string
+		buf  []byte
+	}
+	gzipCh := make(chan TermBuf, 10)
+	bwCh := make(chan TermBuf, 10)
+	finCh := make(chan struct{})
+
+	go func() {
+		defer close(bwCh)
+		for termBuf := range gzipCh {
+			if !compress {
+				bwCh <- termBuf
+			}
+			// else {
+			// 	var zipB bytes.Buffer
+			// 	gz := gzip.NewWriter(&zipB)
+			// 	if _, err = gz.Write(termBuf.buf); err != nil {
+			// 		log.Fatalf("failed to compress term %s: %v\n", termBuf.term, err)
+			// 	}
+			// 	if err := gz.Close(); err != nil {
+			// 		log.Fatalf("failed to compress term %s: %v\n", termBuf.term, err)
+			// 	}
+			// 	if _, err = bw.Write(zipB.Bytes()); err != nil {
+			// 		log.Fatalf("failed to compress term %s: %v\n", termBuf.term, err)
+			// 	}
+			// 	termBuf.buf = zipB.Bytes()
+			// 	bwCh <- termBuf
+			// }
+		}
+	}()
+
+	go func() {
+		defer close(finCh)
+		var pos uint64
+		for termBuf := range bwCh {
+			if _, ok := posStats.TermStart[termBuf.term]; ok {
+				log.Fatalf("entry already existed: %s\n", termBuf.term)
+			}
+			posStats.TermStart[termBuf.term] = pos
+			if _, err = bw.Write(termBuf.buf); err != nil {
+				log.Fatalf("failed to write term %s: %v\n", termBuf.term, err)
+			}
+			pos = bufWriter.Total()
+			posStats.TermEnd[termBuf.term] = pos
+		}
+	}()
+
 	defer outIter.Stop()
 	for {
 		_, listIter, ok := outIter.Next()
 		if !ok {
 			break
 		}
-		termCount++
-		if _, ok := termPos[listIter.Term]; ok {
-			log.Fatal("entry already existed", listIter.Term)
+		plusCount := strings.Count(listIter.Term, "+")
+		switch plusCount {
+		case 1:
+			twograms++
+		case 2:
+			threegrams++
+		default:
+			unigrams++
 		}
-		termPos[listIter.Term] = pos
 
-		if bw.WriteString(listIter.Term); err != nil {
+		tempBuf := binary.NewMemBuf()
+		tempBw := binary.NewByteWriter(tempBuf)
+
+		if err = tempBw.WriteString(listIter.Term); err != nil {
 			log.Fatalf("failed to write term in out file: %v\n", err)
 		}
-
 		for {
 			_, posting, ok := listIter.Next()
 			if !ok {
 				break
 			}
 			postingCount++
-			if err := WritePosting(bw, posting); err != nil {
+			if err := WritePosting(tempBw, posting); err != nil {
 				log.Fatalf("failed to write posting in out file: %v\n", err)
 			}
 		}
-
-		if err := bw.WriteUInt8(uint8(PostingTypeEnd)); err != nil {
+		// if err := tempBw.WriteUInt8(uint8(PostingTypeEnd)); err != nil {
+		// 	log.Fatalf("failed to write end mark in out file: %v\n", err)
+		// }
+		if _, err := WritePostingHeader(tempBw, PostingTypeEnd, 0); err != nil {
 			log.Fatalf("failed to write end mark in out file: %v\n", err)
 		}
 
 		listIter.Stop()
-		pos = bufWriter.Total()
+
+		gzipCh <- TermBuf{
+			term: listIter.Term,
+			buf:  tempBuf.Bytes(),
+		}
 	}
+
+	close(gzipCh)
+	<-finCh
 
 	outFStats, err := outFile.Stat()
 	if err != nil {
@@ -351,11 +425,17 @@ func BuildIndex(batch, tasks, workers int, srcDir, dstDir string) {
 	defer posFile.Close()
 
 	posEncoder := gob.NewEncoder(posFile)
-	posEncoder.Encode(termPos)
+	posEncoder.Encode(posStats)
+	posFStats, err := posFile.Stat()
+	if err != nil {
+		log.Fatalf("failed to get stat of pos file: %v\n", err)
+	}
 
 	log.Printf(
-		"Batch: %d. Tasks: %d. Terms: %d. Postings: %d. List Size: %.2f MB. Stats Size: %.2f MB. Time: %v\n",
-		batch, tasks, termCount, postingCount, float64(outFStats.Size())/units.MB, float64(statsFStats.Size())/units.MB, time.Since(start))
+		"Batch: %d. Tasks: %d. Unigram: %d. Twogram: %d. Threegram: %d. Postings: %d. Index Size: %.2f MB. Term Stats Size: %.2f MB. Pos Stats Size: %.2f MB. Time: %v\n",
+		batch, tasks, unigrams, twograms, threegrams, postingCount,
+		float64(outFStats.Size())/units.MB, float64(statsFStats.Size())/units.MB, float64(posFStats.Size())/units.MB,
+		time.Since(start))
 
 	oldPath := outFile.Name()
 	indexPath := path.Join(dstDir, "term_list")

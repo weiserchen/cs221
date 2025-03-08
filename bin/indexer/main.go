@@ -17,9 +17,10 @@ func main() {
 	batch := 100
 	// tasks := 100
 	tasks := -1
-	workers := 4
+	workers := 2
 	srcDir := "../../DEV"
 	dstDir := "../../.index"
+	compress := false
 
-	indexer.BuildIndex(batch, tasks, workers, srcDir, dstDir)
+	indexer.BuildIndex(batch, tasks, workers, srcDir, dstDir, compress)
 }

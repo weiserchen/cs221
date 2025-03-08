@@ -2,6 +2,7 @@ package binary
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/binary"
 	"io"
 )
@@ -9,7 +10,7 @@ import (
 type BufferedWriteCloser struct {
 	w     *bufio.Writer
 	wc    io.WriteCloser
-	count int
+	count uint64
 }
 
 func NewBufferedWriteCloser(w io.WriteCloser) *BufferedWriteCloser {
@@ -19,7 +20,7 @@ func NewBufferedWriteCloser(w io.WriteCloser) *BufferedWriteCloser {
 	}
 }
 
-func (bw *BufferedWriteCloser) Total() int {
+func (bw *BufferedWriteCloser) Total() uint64 {
 	return bw.count
 }
 
@@ -28,7 +29,7 @@ func (bw *BufferedWriteCloser) Buffered() int {
 }
 
 func (bw *BufferedWriteCloser) Write(p []byte) (n int, err error) {
-	bw.count += len(p)
+	bw.count += uint64(len(p))
 	return bw.w.Write(p)
 }
 
@@ -61,6 +62,30 @@ func (br *BufferedReadCloser) Close() error {
 	return br.rc.Close()
 }
 
+type MemBuf struct {
+	buf bytes.Buffer
+}
+
+func NewMemBuf() *MemBuf {
+	return &MemBuf{}
+}
+
+func (mb *MemBuf) Read(p []byte) (n int, err error) {
+	return mb.buf.Read(p)
+}
+
+func (mb *MemBuf) Write(p []byte) (n int, err error) {
+	return mb.buf.Write(p)
+}
+
+func (mb *MemBuf) Bytes() []byte {
+	return mb.buf.Bytes()
+}
+
+func (mb *MemBuf) Close() error {
+	return nil
+}
+
 type ByteWriter struct {
 	w io.WriteCloser
 }
@@ -73,6 +98,10 @@ func NewByteWriter(w io.WriteCloser) *ByteWriter {
 
 func NewBufferedByteWriter(w io.WriteCloser) *ByteWriter {
 	return NewByteWriter(NewBufferedWriteCloser(w))
+}
+
+func (bw *ByteWriter) Write(b []byte) (int, error) {
+	return bw.w.Write(b)
 }
 
 func (bw *ByteWriter) WriteBytes(b []byte) error {
@@ -94,6 +123,10 @@ func (bw *ByteWriter) WriteInt(i int) error {
 }
 
 func (bw *ByteWriter) WriteUInt64(i uint64) error {
+	return binary.Write(bw.w, binary.LittleEndian, i)
+}
+
+func (bw *ByteWriter) WriteUInt32(i uint32) error {
 	return binary.Write(bw.w, binary.LittleEndian, i)
 }
 
@@ -143,6 +176,12 @@ func (br *ByteReader) ReadString() (string, error) {
 	return string(b), nil
 }
 
+func (br *ByteReader) ReadByte() (byte, error) {
+	var b byte
+	err := binary.Read(br.r, binary.LittleEndian, &b)
+	return b, err
+}
+
 func (br *ByteReader) ReadInt() (int, error) {
 	var i int64
 	err := binary.Read(br.r, binary.LittleEndian, &i)
@@ -155,16 +194,32 @@ func (br *ByteReader) ReadUInt64() (uint64, error) {
 	return i, err
 }
 
+func (br *ByteReader) ReadUInt32() (uint32, error) {
+	var i uint32
+	err := binary.Read(br.r, binary.LittleEndian, &i)
+	return i, err
+}
+
 func (br *ByteReader) ReadUInt16() (uint16, error) {
 	var i uint16
 	err := binary.Read(br.r, binary.LittleEndian, &i)
 	return i, err
 }
 
-func (br *ByteReader) ReadUint8() (uint8, error) {
+func (br *ByteReader) ReadUInt8() (uint8, error) {
 	var i uint8
 	err := binary.Read(br.r, binary.LittleEndian, &i)
 	return i, err
+}
+
+func (br *ByteReader) ReadHeader() (uint8, uint8, error) {
+	header, err := br.ReadUInt8()
+	if err != nil {
+		return 0, 0, err
+	}
+	tagType := (header & 12) >> 2
+	docIDLen := header & 3
+	return tagType, docIDLen, nil
 }
 
 func (br *ByteReader) Close() error {

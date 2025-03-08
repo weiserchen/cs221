@@ -18,21 +18,20 @@ type ResultDoc struct {
 type Engine struct {
 	IndexPath  string
 	IndexStats indexer.IndexStats
+	PosStats   indexer.PosStats
 	Ranker     *Ranker
-	TermPos    map[string]int
 	Cache      IndexListCache
 	cacheSize  int
 	workers    int
 }
 
-func NewEngine(srcDir string, cacheSize int, workers int) *Engine {
+func NewEngine(srcDir string, cacheSize int, workers int, compress bool) *Engine {
 	indexPath := path.Join(srcDir, "term_list")
 	statsPath := path.Join(srcDir, "term_stats")
 	posPath := path.Join(srcDir, "term_pos")
 
 	engine := &Engine{
 		IndexPath: indexPath,
-		TermPos:   map[string]int{},
 		cacheSize: cacheSize,
 		workers:   workers,
 	}
@@ -43,6 +42,7 @@ func NewEngine(srcDir string, cacheSize int, workers int) *Engine {
 	}
 	statsDecoder := gob.NewDecoder(statsFile)
 	statsDecoder.Decode(&engine.IndexStats)
+	log.Println("Stats file decoded...")
 	engine.Ranker = NewRanker(&engine.IndexStats)
 
 	posFile, err := os.Open(posPath)
@@ -50,10 +50,15 @@ func NewEngine(srcDir string, cacheSize int, workers int) *Engine {
 		log.Fatal(err)
 	}
 	posDecoder := gob.NewDecoder(posFile)
-	posDecoder.Decode(&engine.TermPos)
+	posDecoder.Decode(&engine.PosStats)
+	log.Println("Pos file decoded...")
 
-	diskCache := NewDiskIndexListCache(indexPath, workers, engine.TermPos)
+	diskCache := NewDiskIndexListCache(indexPath, workers, engine.PosStats, compress)
+	log.Println("Disk cache initialized...")
+
 	memCache := NewMemoryIndexListCache(cacheSize, diskCache)
+	log.Println("Mem cache initialized...")
+
 	engine.Cache = memCache
 
 	return engine

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/gob"
+	"log"
 	"os"
 	"path"
 	"petersearch/pkg/indexer"
@@ -22,14 +23,16 @@ func TestIndexIntegrity(t *testing.T) {
 		os.RemoveAll(dstDir)
 	})
 
-	indexer.BuildIndex(batch, tasks, workers, srcDir, dstDir)
+	indexer.BuildIndex(batch, tasks, workers, srcDir, dstDir, false)
+
+	log.Println("index build completed...")
 
 	indexPath := path.Join(dstDir, "term_list")
 	statsPath := path.Join(dstDir, "term_stats")
 	posPath := path.Join(dstDir, "term_pos")
 
 	var indexStats indexer.IndexStats
-	var termPos map[string]int
+	var posStats indexer.PosStats
 
 	statsFile, err := os.Open(statsPath)
 	require.NoError(t, err)
@@ -39,7 +42,7 @@ func TestIndexIntegrity(t *testing.T) {
 	posFile, err := os.Open(posPath)
 	require.NoError(t, err)
 	posDecoder := gob.NewDecoder(posFile)
-	posDecoder.Decode(&termPos)
+	posDecoder.Decode(&posStats)
 
 	indexIter := indexer.FilePartialIndexIterator(indexPath)
 	memoryIndex := map[string][]indexer.Posting{}
@@ -67,7 +70,7 @@ func TestIndexIntegrity(t *testing.T) {
 
 	indexFile, err := os.Open(indexPath)
 	require.NoError(t, err)
-	for term, pos := range termPos {
+	for term, pos := range posStats.TermStart {
 		indexFile.Seek(int64(pos), 0)
 		br := binary.NewBufferedByteReader(indexFile)
 		listIter, err := indexer.ReadInvertedList(br)

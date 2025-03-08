@@ -1,7 +1,10 @@
 package engine
 
 import (
+	"bytes"
+	"compress/gzip"
 	"errors"
+	"io"
 	"log"
 	"os"
 	"petersearch/pkg/indexer"
@@ -64,12 +67,14 @@ type DiskIndexListCache struct {
 	accessCh  chan termRequest
 	accessors []*os.File
 	workers   int
-	termPos   map[string]int
+	posStats  indexer.PosStats
+	compress  bool
 }
 
 type termRequest struct {
 	term     string
-	pos      int
+	posStart uint64
+	posEnd   uint64
 	resultCh chan<- termResponse
 }
 
@@ -78,7 +83,7 @@ type termResponse struct {
 	err    error
 }
 
-func NewDiskIndexListCache(filename string, workers int, termPos map[string]int) *DiskIndexListCache {
+func NewDiskIndexListCache(filename string, workers int, posStats indexer.PosStats, compress bool) *DiskIndexListCache {
 	accessCh := make(chan termRequest, workers)
 	var accessors []*os.File
 	for range workers {
@@ -92,7 +97,7 @@ func NewDiskIndexListCache(filename string, workers int, termPos map[string]int)
 				f.Close()
 			}()
 			for req := range accessCh {
-				req.resultCh <- getTermFromFile(f, req.term, req.pos)
+				req.resultCh <- getTermFromFile(f, req.term, req.posStart, req.posEnd, compress)
 			}
 		}()
 	}
@@ -101,12 +106,17 @@ func NewDiskIndexListCache(filename string, workers int, termPos map[string]int)
 		accessCh:  accessCh,
 		accessors: accessors,
 		workers:   workers,
-		termPos:   termPos,
+		posStats:  posStats,
+		compress:  compress,
 	}
 }
 
 func (dc *DiskIndexListCache) Get(term string) (indexer.InvertedList, error) {
-	pos, ok := dc.termPos[term]
+	posStart, ok := dc.posStats.TermStart[term]
+	if !ok {
+		return indexer.InvertedList{}, ErrCacheEntryNotFound
+	}
+	posEnd, ok := dc.posStats.TermEnd[term]
 	if !ok {
 		return indexer.InvertedList{}, ErrCacheEntryNotFound
 	}
@@ -114,7 +124,8 @@ func (dc *DiskIndexListCache) Get(term string) (indexer.InvertedList, error) {
 	resultCh := make(chan termResponse)
 	req := termRequest{
 		term:     term,
-		pos:      pos,
+		posStart: posStart,
+		posEnd:   posEnd,
 		resultCh: resultCh,
 	}
 	dc.accessCh <- req
@@ -127,16 +138,37 @@ func (dc *DiskIndexListCache) Set(term string, list indexer.InvertedList) error 
 	return ErrCacheSetOpertationNotSupported
 }
 
-func getTermFromFile(f *os.File, term string, pos int) termResponse {
+func getTermFromFile(f *os.File, term string, posStart, posEnd uint64, compress bool) termResponse {
 	var list indexer.InvertedList
 
-	if _, err := f.Seek(int64(pos), 0); err != nil {
+	if _, err := f.Seek(int64(posStart), 0); err != nil {
 		return termResponse{
 			err: err,
 		}
 	}
 
-	br := binary.NewBufferedByteReader(f)
+	buf := make([]byte, posEnd-posStart)
+	_, err := io.ReadFull(f, buf)
+	if err != nil {
+		return termResponse{
+			err: err,
+		}
+	}
+
+	var r io.ReadCloser
+	if compress {
+		gzReader, err := gzip.NewReader(bytes.NewReader(buf))
+		if err != nil {
+			return termResponse{
+				err: err,
+			}
+		}
+		r = gzReader
+	} else {
+		r = io.NopCloser(bytes.NewReader(buf))
+	}
+
+	br := binary.NewBufferedByteReader(r)
 	listIter, err := indexer.ReadInvertedList(br)
 	if err != nil {
 		return termResponse{

@@ -3,7 +3,7 @@ DEV/
 bin/indexer/indexer
 bin/indexer/mem.prof
 bin/indexer/trace.out
-bin/indexer/index
+bin/indexer/index*
 bin/parser/parser
 pkg/indexer/testdir
 *.index/

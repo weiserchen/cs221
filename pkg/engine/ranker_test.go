@@ -11,14 +11,14 @@ func TestDocStats(t *testing.T) {
 	cacheSize := 256
 	workers := 4
 
-	ng := NewEngine(srcDir, cacheSize, workers)
+	ng := NewEngine(srcDir, cacheSize, workers, false)
 	totalStats := NewDocStats()
 	batch := 100
 	tasks := 10
 	limit := batch * tasks
 	count := 0
 	terms := []string{}
-	for term := range ng.TermPos {
+	for term := range ng.PosStats.TermStart {
 		if count >= limit {
 			break
 		}
