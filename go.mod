@@ -4,11 +4,14 @@ go 1.23.4
 
 require (
 	github.com/aymerick/douceur v0.2.0 // indirect
+	github.com/clipperhouse/jargon v1.0.9 // indirect
+	github.com/clipperhouse/uax29 v1.11.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/emirpasic/gods/v2 v2.0.0-alpha // indirect
 	github.com/gorilla/css v1.0.1 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
+	github.com/kljensen/snowball v0.6.0 // indirect
 	github.com/mfonda/simhash v0.0.0-20151007195837-79f94a1100d6 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect

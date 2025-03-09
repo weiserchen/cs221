@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/url"
 	"os"
 	"path/filepath"
 	"petersearch/pkg/utils/stream"
@@ -40,13 +41,14 @@ type RawDoc struct {
 }
 
 type Doc struct {
-	ID         uint64
-	URL        string
-	Tokens     []string
-	TwoGrams   []string
-	ThreeGrams []string
-	TagMap     map[string][]string
-	RawSize    int
+	ID             uint64
+	URL            string
+	Tokens         []string
+	TwoGrams       []string
+	ThreeGrams     []string
+	OriginalTokens []string
+	TagMap         map[string][]string
+	RawSize        int
 }
 
 func (doc *Doc) Print() {
@@ -124,6 +126,7 @@ func ParseDirDocs(rawFiles []string, workerNum, batchSize, batchCount int, consu
 	dupFileCount := atomic.Int64{}
 
 	dupMap := sync.Map{}
+	urlMap := sync.Map{}
 	readWorker := func(in <-chan string, out chan<- []Doc, wg *sync.WaitGroup) {
 		defer wg.Done()
 
@@ -131,11 +134,27 @@ func ParseDirDocs(rawFiles []string, workerNum, batchSize, batchCount int, consu
 		currSize := 0
 		currCount := 0
 		processFunc := func(files []*os.File) {
+			rawDocs := []RawDoc{}
 			for _, file := range files {
 				defer file.Close()
 			}
+			for _, file := range files {
+				rawDoc, err := ReadRawDoc(file)
+				if err != nil {
+					log.Fatal(err)
+				}
+				parsed, err := url.Parse(rawDoc.URL)
+				if err != nil {
+					log.Fatal(err)
+				}
+				// use hostname to dedup files
+				if _, ok := urlMap.LoadOrStore(parsed.Host+parsed.Path, struct{}{}); ok {
+					dupFileCount.Add(1)
+				} else {
+					rawDocs = append(rawDocs, rawDoc)
+				}
+			}
 
-			rawDocs := ReadRawDocs(files)
 			docs := ParseDocs(rawDocs)
 			newDocs := []Doc{}
 			for _, doc := range docs {
@@ -250,27 +269,29 @@ func ParseDocs(rawDocs []RawDoc) []Doc {
 func ParseDoc(rawDoc RawDoc) Doc {
 	content := Sanitize(rawDoc.Content)
 	tokens := ParseTokens(content)
-	tokens = StemTokens(tokens)
-	twoGrams := TwoGrams(tokens)
-	threeGrams := ThreeGrams(tokens)
+	stemmedTokens := StemTokens(tokens)
+	twoGrams := TwoGrams(stemmedTokens)
+	threeGrams := ThreeGrams(stemmedTokens)
 	rawTagMap := ExtractTagMap(rawDoc.Content)
 	tagMap := ParseTagMap(rawTagMap)
 	return Doc{
-		URL:        rawDoc.URL,
-		Tokens:     tokens,
-		TwoGrams:   twoGrams,
-		ThreeGrams: threeGrams,
-		TagMap:     tagMap,
-		RawSize:    rawDoc.size,
+		URL:            rawDoc.URL,
+		Tokens:         stemmedTokens,
+		TwoGrams:       twoGrams,
+		ThreeGrams:     threeGrams,
+		OriginalTokens: tokens,
+		TagMap:         tagMap,
+		RawSize:        rawDoc.size,
 	}
 }
 
 func ParseQuery(query string) []string {
 	query = Sanitize(query)
 	tokens := ParseTokens(query)
-	tokens = StemTokens(tokens)
-	twoGrams := TwoGrams(tokens)
-	threeGrams := ThreeGrams(tokens)
+	stemmedTokens := StemTokens(tokens)
+	twoGrams := TwoGrams(stemmedTokens)
+	threeGrams := ThreeGrams(stemmedTokens)
+	tokens = append(tokens, stemmedTokens...)
 	tokens = append(tokens, twoGrams...)
 	tokens = append(tokens, threeGrams...)
 

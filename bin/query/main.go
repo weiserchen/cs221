@@ -17,5 +17,5 @@ func main() {
 
 	log.Println("Engine initialization completed...")
 
-	ng.Run(k)
+	ng.Run(k, engine.RankAlgoBM25)
 }

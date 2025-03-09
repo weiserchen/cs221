@@ -4,27 +4,59 @@ import (
 	"math"
 	"petersearch/pkg/indexer"
 	"slices"
+	"strings"
+)
+
+type RankAlgo int
+
+const (
+	RankAlgoTFIDF RankAlgo = iota
+	RankAlgoBM25
 )
 
 type DocStats struct {
-	// DocID -> Term -> Count
-	TermFreqs map[uint64]map[string]int
+	// DocID -> Term -> Weighted Count
+	TermFreqs map[uint64]map[string]float64
 	// Term -> DocID -> ok
 	DocFreqs map[string]map[uint64]struct{}
 }
 
 func NewDocStats() *DocStats {
 	return &DocStats{
-		TermFreqs: map[uint64]map[string]int{},
+		TermFreqs: map[uint64]map[string]float64{},
 		DocFreqs:  map[string]map[uint64]struct{}{},
 	}
 }
 
-func (stats *DocStats) AddTerm(docID uint64, term string) {
+func (stats *DocStats) AddPosting(term string, posting indexer.Posting) {
+	docID := posting.DocID
 	if _, ok := stats.TermFreqs[docID]; !ok {
-		stats.TermFreqs[docID] = map[string]int{}
+		stats.TermFreqs[docID] = map[string]float64{}
 	}
-	stats.TermFreqs[docID][term]++
+
+	weightedCount := 0.0
+	switch posting.Type {
+	case indexer.PostingTypeTag:
+		switch posting.Tag {
+		case "title":
+			weightedCount += 5
+		case "h1":
+			weightedCount += 3
+		case "h2":
+			weightedCount += 2
+		case "h3":
+			weightedCount += 1
+		case "b", "i":
+			weightedCount += 0.5
+		}
+	}
+
+	plusCount := strings.Count(term, "+")
+	if plusCount == 0 {
+		stats.TermFreqs[docID][term] += weightedCount
+	} else {
+		stats.TermFreqs[docID][term] += weightedCount * math.Pow(2, float64(plusCount))
+	}
 
 	if _, ok := stats.DocFreqs[term]; !ok {
 		stats.DocFreqs[term] = map[uint64]struct{}{}
@@ -32,9 +64,9 @@ func (stats *DocStats) AddTerm(docID uint64, term string) {
 	stats.DocFreqs[term][docID] = struct{}{}
 }
 
-func (stats *DocStats) AddTermCount(docID uint64, term string, count int) {
+func (stats *DocStats) AddTermWeightedCount(docID uint64, term string, count float64) {
 	if _, ok := stats.TermFreqs[docID]; !ok {
-		stats.TermFreqs[docID] = map[string]int{}
+		stats.TermFreqs[docID] = map[string]float64{}
 	}
 	stats.TermFreqs[docID][term] += count
 }
@@ -46,7 +78,7 @@ func (stats *DocStats) AddDocFreq(docID uint64, term string) {
 	stats.DocFreqs[term][docID] = struct{}{}
 }
 
-func (stats *DocStats) TermCount(docID uint64, term string) int {
+func (stats *DocStats) TermWeightedCount(docID uint64, term string) float64 {
 	if _, ok := stats.TermFreqs[docID]; !ok {
 		return 0
 	}
@@ -60,7 +92,7 @@ func (stats *DocStats) DocCount(term string) int {
 func CollectDocStats(list indexer.InvertedList) *DocStats {
 	stats := NewDocStats()
 	for _, posting := range list.Postings {
-		stats.AddTerm(posting.DocID, list.Term)
+		stats.AddPosting(list.Term, posting)
 	}
 	return stats
 }
@@ -71,7 +103,7 @@ func MergeDocStats(docStats ...*DocStats) *DocStats {
 	for _, stats := range docStats {
 		for docID, freqs := range stats.TermFreqs {
 			for term, count := range freqs {
-				mergedStats.AddTermCount(docID, term, count)
+				mergedStats.AddTermWeightedCount(docID, term, count)
 			}
 		}
 		for term, freqs := range stats.DocFreqs {
@@ -107,12 +139,12 @@ func (r *Ranker) TFIDF(terms []string, docStats *DocStats) []Score {
 	for docID := range docStats.TermFreqs {
 		docLen := float64(r.indexStats.DocLen(docID))
 		for _, term := range terms {
-			termCount := float64(docStats.TermCount(docID, term))
+			termCount := docStats.TermWeightedCount(docID, term)
 			termDocCount := float64(docStats.DocCount(term))
 			tf := termCount / docLen
 			idf := 1 + math.Log((totalDocCount+1)/(termDocCount+1))
-			scoreMap[docID] += tf * idf * idf
-			// scoreMap[docID] += tf * idf
+			// scoreMap[docID] += tf * idf * idf
+			scoreMap[docID] += tf * idf
 		}
 	}
 
@@ -127,24 +159,33 @@ func (r *Ranker) TFIDF(terms []string, docStats *DocStats) []Score {
 	return scores
 }
 
-// func (r *Ranker) BM25(terms []string, docStats *DocStats) map[int]float64 {
-// 	// DocID -> score
-// 	scores := map[int]float64{}
+func (r *Ranker) BM25(terms []string, docStats *DocStats) []Score {
+	// DocID -> score
+	scoreMap := map[uint64]float64{}
 
-// 	totalDocCount := float64(r.indexStats.DocCount)
-// 	avgTermCount := float64(r.indexStats.TermCount()) / totalDocCount
-// 	k, b := 1.5, 0.75
-// 	for docID := range docStats.TermFreqs {
-// 		for _, term := range terms {
-// 			termDocCount := float64(r.indexStats.TermDocFreqCount(term))
-// 			idf := math.Log((totalDocCount - termDocCount + 0.5) / (termDocCount + 0.5 + 1))
-// 			tf := float64(docStats.TermCount(docID, term))
-// 			scores[docID] += idf * tf / (tf + k*(1-b+b*totalDocCount/avgTermCount))
-// 		}
-// 	}
+	k, b := 1.5, 0.75
+	avg := r.indexStats.AvgTermPerDoc()
+	N := float64(r.indexStats.DocCount)
+	for docID := range docStats.TermFreqs {
+		d := float64(r.indexStats.DocLen(docID))
+		for _, term := range terms {
+			tf := docStats.TermWeightedCount(docID, term)
+			Nt := float64(docStats.DocCount(term))
+			idf := math.Log((N-Nt+0.5)/(Nt+0.5) + 1)
+			scoreMap[docID] += idf * tf / (tf + k*(1-b+b*d/avg))
+		}
+	}
 
-// 	return scores
-// }
+	scores := make([]Score, 0, len(scoreMap))
+	for docID, value := range scoreMap {
+		scores = append(scores, Score{
+			DocID: docID,
+			Value: value,
+		})
+	}
+
+	return scores
+}
 
 func SortScoreAscendComparator(s1, s2 Score) int {
 	if s1.Value < s2.Value {

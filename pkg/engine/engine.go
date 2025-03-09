@@ -90,12 +90,12 @@ func (ng *Engine) DocURLs(docIDs []uint64) []string {
 	return urls
 }
 
-func (ng *Engine) Process(query string, k int) ([]ResultDoc, error) {
+func (ng *Engine) Process(query string, k int, ranker RankAlgo) ([]ResultDoc, error) {
 	var result []ResultDoc
 	var mergedStats *DocStats
 
 	terms := parser.ParseQuery(query)
-	log.Println(terms)
+	fmt.Printf("Expanded Terms: %v\n", terms)
 
 	var scores []Score
 	var err error
@@ -123,7 +123,7 @@ func (ng *Engine) Process(query string, k int) ([]ResultDoc, error) {
 
 					stats = NewDocStats()
 					for _, posting := range list.Postings {
-						stats.AddTerm(posting.DocID, term)
+						stats.AddPosting(term, posting)
 					}
 					ng.TermCache.Set(term, stats)
 				}
@@ -142,7 +142,12 @@ func (ng *Engine) Process(query string, k int) ([]ResultDoc, error) {
 		}
 
 		mergedStats = MergeDocStats(docStats...)
-		scores = ng.Ranker.TFIDF(terms, mergedStats)
+		switch ranker {
+		case RankAlgoTFIDF:
+			scores = ng.Ranker.TFIDF(terms, mergedStats)
+		default:
+			scores = ng.Ranker.BM25(terms, mergedStats)
+		}
 		ng.QueryCache.Set(normalizedQuery, scores)
 	}
 
@@ -159,7 +164,7 @@ func (ng *Engine) Process(query string, k int) ([]ResultDoc, error) {
 	return result, nil
 }
 
-func (ng *Engine) Run(k int) {
+func (ng *Engine) Run(k int, ranker RankAlgo) {
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
 		fmt.Print("Enter query: ")
@@ -169,19 +174,24 @@ func (ng *Engine) Run(k int) {
 		query := scanner.Text()
 
 		start := time.Now()
-		list, err := ng.Process(query, k)
+		list, err := ng.Process(query, k, ranker)
 		if err != nil {
 			if err == ErrCacheEntryNotFound {
 				fmt.Println("No documents!")
+				continue
 			} else {
 				log.Fatal(err)
 			}
 		}
+		// searchEnd := time.Since(start)
+
+		var sb strings.Builder
 		for i, item := range list {
-			fmt.Printf("%d) %d %s %f\n", i+1, item.DocID, item.DocURL, item.Score)
+			fmt.Fprintf(&sb, "%d) %d %s %f\n", i+1, item.DocID, item.DocURL, item.Score)
 		}
-		fmt.Printf("Total time: %v\n", time.Since(start))
-		fmt.Println()
+		totalEnd := time.Since(start)
+		fmt.Fprintf(&sb, "Total Time: %v\n", totalEnd)
+		fmt.Println(sb.String())
 	}
 	if err := scanner.Err(); err != nil {
 		fmt.Println("Error:", err)

@@ -31,6 +31,14 @@ func (stats *IndexStats) DocLen(docID uint64) int {
 	return stats.DocTermCount[docID]
 }
 
+func (stats *IndexStats) AvgTermPerDoc() float64 {
+	totalTermCount := 0
+	for _, count := range stats.DocTermCount {
+		totalTermCount += count
+	}
+	return float64(totalTermCount) / float64(stats.DocCount)
+}
+
 type PosStats struct {
 	TermStart map[string]uint64
 	TermEnd   map[string]uint64

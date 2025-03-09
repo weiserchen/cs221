@@ -17,9 +17,7 @@ var ErrPostingTypeEnd = errors.New("posting list ends")
 type PostingType uint8
 
 const (
-	PostingTypeUniGram PostingType = iota
-	PostingTypeTwoGram
-	PostingTypeThreeGram
+	PostingTypeText PostingType = iota
 	PostingTypeTag
 	PostingTypeEnd
 )
@@ -94,7 +92,7 @@ func ParsePostings(doc parser.Doc, index PartialIndex, stats *IndexStats) {
 
 	for _, token := range doc.Tokens {
 		posting := Posting{
-			Type:  PostingTypeUniGram,
+			Type:  PostingTypeText,
 			DocID: doc.ID,
 			Pos:   pos,
 		}
@@ -103,10 +101,20 @@ func ParsePostings(doc parser.Doc, index PartialIndex, stats *IndexStats) {
 		pos++
 	}
 
+	for _, token := range doc.OriginalTokens {
+		posting := Posting{
+			Type:  PostingTypeText,
+			DocID: doc.ID,
+			Pos:   0, // not used
+		}
+		index[token] = append(index[token], posting)
+		stats.AddTerm(doc.ID, token)
+	}
+
 	pos = 0
 	for _, token := range doc.TwoGrams {
 		posting := Posting{
-			Type:  PostingTypeTwoGram,
+			Type:  PostingTypeText,
 			DocID: doc.ID,
 			Pos:   pos,
 		}
@@ -118,7 +126,7 @@ func ParsePostings(doc parser.Doc, index PartialIndex, stats *IndexStats) {
 	pos = 0
 	for _, token := range doc.ThreeGrams {
 		posting := Posting{
-			Type:  PostingTypeThreeGram,
+			Type:  PostingTypeText,
 			DocID: doc.ID,
 			Pos:   pos,
 		}
@@ -160,21 +168,6 @@ func ReadPosting(br *binary.ByteReader) (Posting, error) {
 		return posting, err
 	}
 	posting.DocID = pDocID
-
-	// pType, err := br.ReadUInt8()
-	// if err != nil {
-	// 	return posting, err
-	// }
-	// posting.Type = PostingType(pType)
-	// if posting.Type == PostingTypeEnd {
-	// 	return posting, ErrPostingTypeEnd
-	// }
-
-	// pDocID, err := br.ReadUInt64()
-	// if err != nil {
-	// 	return posting, err
-	// }
-	// posting.DocID = pDocID
 
 	if posting.Type == PostingTypeTag {
 		tag, err := br.ReadUInt8()

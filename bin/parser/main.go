@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"petersearch/pkg/parser"
 	"petersearch/pkg/utils/stream"
@@ -39,5 +40,6 @@ func main() {
 	// 	log.Fatal(err)
 	// }
 	doc := consumer.Collect()[0]
+	fmt.Println(len(doc.Tokens))
 	doc.Print()
 }

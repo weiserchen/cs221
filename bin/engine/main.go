@@ -28,7 +28,7 @@ func main() {
 
 	for _, query := range rawQueries {
 		start := time.Now()
-		list, err := ng.Process(query, k)
+		list, err := ng.Process(query, k, engine.RankAlgoTFIDF)
 		if err != nil {
 			log.Fatal(err)
 		}

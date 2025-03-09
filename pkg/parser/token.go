@@ -67,8 +67,23 @@ func Sanitize(s string) string {
 }
 
 func ParseTokens(s string) []string {
+	// re := regexp.MustCompile(`[a-z0-9]+`)
+	// tokens := re.FindAllString(s, -1)
+	// tokenStr := strings.Join(tokens, " ")
+
+	// tokens := []string{}
+
+	// stream := jargon.TokenizeString(s).
+	// 	Filter(stackoverflow.Tags).
+	// 	Filter(contractions.Expand)
+
+	// for stream.Scan() {
+	// 	tokens = append(tokens, strings.TrimSpace(stream.Token().String()))
+	// }
+
 	re := regexp.MustCompile(`[a-z0-9]+`)
 	tokens := re.FindAllString(s, -1)
+
 	return tokens
 }
 

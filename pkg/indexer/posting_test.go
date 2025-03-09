@@ -9,11 +9,9 @@ import (
 
 func TestPostingCompactHeader(t *testing.T) {
 	pTypes := []PostingType{
+		PostingTypeText,
 		PostingTypeTag,
 		PostingTypeEnd,
-		PostingTypeUniGram,
-		PostingTypeTwoGram,
-		PostingTypeThreeGram,
 	}
 
 	docIDLens := []uint8{0, 1, 2, 3}
