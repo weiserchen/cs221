@@ -10,6 +10,8 @@ import (
 func main() {
 	srcDir := "../../DEV"
 	workers := 1
+	batchSize := 100_000_000 // 100MB
+	batchCount := 100
 	consumer := stream.NewArrayConsumer[parser.Doc]()
 
 	rawFiles, err := parser.ReadFiles(srcDir)
@@ -21,7 +23,7 @@ func main() {
 	sort.Strings(rawFiles)
 	rawFiles = rawFiles[:1000]
 
-	err = parser.ParseDirDocs(rawFiles, workers, consumer)
+	err = parser.ParseDirDocs(rawFiles, workers, batchSize, batchCount, consumer)
 	if err != nil {
 		log.Fatal(err)
 	}

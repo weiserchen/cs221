@@ -1,12 +1,17 @@
 package engine
 
 import (
+	"bufio"
 	"encoding/gob"
+	"fmt"
 	"log"
 	"os"
 	"path"
 	"petersearch/pkg/indexer"
 	"petersearch/pkg/parser"
+	"strings"
+	"sync"
+	"time"
 )
 
 type ResultDoc struct {
@@ -20,7 +25,9 @@ type Engine struct {
 	IndexStats indexer.IndexStats
 	PosStats   indexer.PosStats
 	Ranker     *Ranker
-	Cache      IndexListCache
+	ListCache  IndexListCache
+	TermCache  *GeneralCache[*DocStats]
+	QueryCache *GeneralCache[[]Score]
 	cacheSize  int
 	workers    int
 }
@@ -53,13 +60,15 @@ func NewEngine(srcDir string, cacheSize int, workers int, compress bool) *Engine
 	posDecoder.Decode(&engine.PosStats)
 	log.Println("Pos file decoded...")
 
-	diskCache := NewDiskIndexListCache(indexPath, workers, engine.PosStats, compress)
+	diskListCache := NewDiskIndexListCache(indexPath, workers, engine.PosStats, compress)
 	log.Println("Disk cache initialized...")
 
-	memCache := NewMemoryIndexListCache(cacheSize, diskCache)
-	log.Println("Mem cache initialized...")
+	// memListCache := NewMemoryIndexListCache(cacheSize, diskListCache)
+	// log.Println("Mem cache initialized...")
 
-	engine.Cache = memCache
+	engine.ListCache = diskListCache
+	engine.TermCache = NewGeneralCache[*DocStats](cacheSize * 2)
+	engine.QueryCache = NewGeneralCache[[]Score](cacheSize)
 
 	return engine
 }
@@ -83,27 +92,61 @@ func (ng *Engine) DocURLs(docIDs []uint64) []string {
 
 func (ng *Engine) Process(query string, k int) ([]ResultDoc, error) {
 	var result []ResultDoc
+	var mergedStats *DocStats
 
 	terms := parser.ParseQuery(query)
 	log.Println(terms)
-	docStats := []*DocStats{}
 
-	for _, term := range terms {
-		list, err := ng.Cache.Get(term)
-		if err != nil {
-			return result, err
+	var scores []Score
+	var err error
+	normalizedQuery := strings.Join(terms, " ")
+	scores, err = ng.QueryCache.Get(normalizedQuery)
+	if err != nil {
+		docStats := []*DocStats{}
+		statsCh := make(chan *DocStats)
+
+		var wg sync.WaitGroup
+		wg.Add(len(terms))
+		for _, term := range terms {
+			go func() {
+				defer wg.Done()
+				var stats *DocStats
+				var err error
+
+				stats, err = ng.TermCache.Get(term)
+				if err != nil {
+					list, err := ng.ListCache.Get(term)
+					if err != nil {
+						log.Println(err)
+						return
+					}
+
+					stats = NewDocStats()
+					for _, posting := range list.Postings {
+						stats.AddTerm(posting.DocID, term)
+					}
+					ng.TermCache.Set(term, stats)
+				}
+
+				statsCh <- stats
+			}()
 		}
-		stats := NewDocStats()
-		for _, posting := range list.Postings {
-			stats.AddTerm(posting.DocID, term)
+
+		go func() {
+			defer close(statsCh)
+			wg.Wait()
+		}()
+
+		for stats := range statsCh {
+			docStats = append(docStats, stats)
 		}
-		docStats = append(docStats, stats)
+
+		mergedStats = MergeDocStats(docStats...)
+		scores = ng.Ranker.TFIDF(terms, mergedStats)
+		ng.QueryCache.Set(normalizedQuery, scores)
 	}
 
-	mergedStats := MergeDocStats(docStats...)
-	scores := ng.Ranker.TFIDF(terms, mergedStats)
 	scores = TopK(scores, k)
-
 	result = make([]ResultDoc, 0, len(scores))
 	for _, score := range scores {
 		result = append(result, ResultDoc{
@@ -116,6 +159,31 @@ func (ng *Engine) Process(query string, k int) ([]ResultDoc, error) {
 	return result, nil
 }
 
-func (ng *Engine) Run() {
+func (ng *Engine) Run(k int) {
+	scanner := bufio.NewScanner(os.Stdin)
+	for {
+		fmt.Print("Enter query: ")
+		if !scanner.Scan() {
+			break
+		}
+		query := scanner.Text()
 
+		start := time.Now()
+		list, err := ng.Process(query, k)
+		if err != nil {
+			if err == ErrCacheEntryNotFound {
+				fmt.Println("No documents!")
+			} else {
+				log.Fatal(err)
+			}
+		}
+		for i, item := range list {
+			fmt.Printf("%d) %d %s %f\n", i+1, item.DocID, item.DocURL, item.Score)
+		}
+		fmt.Printf("Total time: %v\n", time.Since(start))
+		fmt.Println()
+	}
+	if err := scanner.Err(); err != nil {
+		fmt.Println("Error:", err)
+	}
 }

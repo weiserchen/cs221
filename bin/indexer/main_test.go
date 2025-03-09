@@ -13,7 +13,8 @@ import (
 )
 
 func TestIndexIntegrity(t *testing.T) {
-	batch := 100
+	batchSize := 100_000_000
+	batchCount := 100
 	tasks := 10
 	workers := 4
 	srcDir := "../../DEV"
@@ -23,7 +24,7 @@ func TestIndexIntegrity(t *testing.T) {
 		os.RemoveAll(dstDir)
 	})
 
-	indexer.BuildIndex(batch, tasks, workers, srcDir, dstDir, false)
+	indexer.BuildIndex(batchSize, batchCount, tasks, workers, srcDir, dstDir, false)
 
 	log.Println("index build completed...")
 

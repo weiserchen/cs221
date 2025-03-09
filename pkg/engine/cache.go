@@ -26,6 +26,31 @@ type IndexListCache interface {
 var _ IndexListCache = (*MemoryIndexListCache)(nil)
 var _ IndexListCache = (*DiskIndexListCache)(nil)
 
+type GeneralCache[T any] struct {
+	cache *lru.Cache[string, T]
+}
+
+func NewGeneralCache[T any](size int) *GeneralCache[T] {
+	cache, _ := lru.New[string, T](size)
+	return &GeneralCache[T]{
+		cache: cache,
+	}
+}
+
+func (gc *GeneralCache[T]) Get(term string) (T, error) {
+	var v T
+	v, ok := gc.cache.Get(term)
+	if !ok {
+		return v, ErrCacheEntryNotFound
+	}
+	return v, nil
+}
+
+func (gc *GeneralCache[T]) Set(term string, v T) error {
+	gc.cache.Add(term, v)
+	return nil
+}
+
 type MemoryIndexListCache struct {
 	cache *lru.Cache[string, indexer.InvertedList]
 	src   IndexListCache

@@ -23,7 +23,7 @@ func TestDocStats(t *testing.T) {
 			break
 		}
 		terms = append(terms, term)
-		list, err := ng.Cache.Get(term)
+		list, err := ng.ListCache.Get(term)
 		require.NoError(t, err)
 		for _, posting := range list.Postings {
 			totalStats.AddTerm(posting.DocID, term)
@@ -36,7 +36,7 @@ func TestDocStats(t *testing.T) {
 		stats := NewDocStats()
 		for b := range batch {
 			term := terms[l*batch+b]
-			list, err := ng.Cache.Get(term)
+			list, err := ng.ListCache.Get(term)
 			require.NoError(t, err)
 			for _, posting := range list.Postings {
 				stats.AddTerm(posting.DocID, term)

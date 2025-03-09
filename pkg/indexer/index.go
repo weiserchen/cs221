@@ -142,26 +142,23 @@ func WritePartialIndex(bw *binary.ByteWriter, index PartialIndex) error {
 		if _, err := WritePostingHeader(bw, PostingTypeEnd, 0); err != nil {
 			return err
 		}
-		// if err := bw.WriteUInt8(uint8(PostingTypeEnd)); err != nil {
-		// 	return err
-		// }
-
 	}
 	return nil
 }
 
-func BuildPartialIndex(batch int, producer stream.Producer, indexConsumer, statsConsumer stream.Consumer) {
+func BuildPartialIndex(batchSize, batchCount int, producer stream.Producer, indexConsumer, statsConsumer stream.Consumer) {
 	stats := NewIndexStats()
 	defer func() {
 		statsConsumer.Consume(stats)
 	}()
 
-	count := 0
+	currCount := 0
+	currSize := 0
 	index := PartialIndex{}
 	for {
 		v, ok := producer.Produce()
 		if !ok {
-			if count != 0 {
+			if currCount != 0 {
 				indexConsumer.Consume(index)
 			}
 			break
@@ -171,12 +168,16 @@ func BuildPartialIndex(batch int, producer stream.Producer, indexConsumer, stats
 		stats.AddDoc(doc)
 		ParsePostings(doc, index, stats)
 
-		count++
-		if count == batch {
-			indexConsumer.Consume(index)
-			count = 0
-			index = PartialIndex{}
+		currCount++
+		currSize += doc.RawSize
+		if currSize < batchSize && currCount < batchCount {
+			continue
 		}
+
+		indexConsumer.Consume(index)
+		currCount = 0
+		currSize = 0
+		index = PartialIndex{}
 	}
 }
 
@@ -202,7 +203,7 @@ func SavePartialIndex(dir string, producer stream.Producer, consumer stream.Cons
 	}
 }
 
-func BuildIndex(batch, tasks, workers int, srcDir, dstDir string, compress bool) {
+func BuildIndex(batchSize, batchCount, tasks, workers int, srcDir, dstDir string, compress bool) {
 	if compress {
 		log.Fatal("unsupported option")
 	}
@@ -220,7 +221,7 @@ func BuildIndex(batch, tasks, workers int, srcDir, dstDir string, compress bool)
 	}
 
 	sort.Strings(rawFiles)
-	total := batch * tasks
+	total := batchCount * tasks
 	if total >= 0 {
 		rawFiles = rawFiles[:total]
 	}
@@ -229,7 +230,7 @@ func BuildIndex(batch, tasks, workers int, srcDir, dstDir string, compress bool)
 		defer func() {
 			close(docCh)
 		}()
-		err = parser.ParseDirDocs(rawFiles, workers, consumer)
+		err = parser.ParseDirDocs(rawFiles, workers, batchSize, batchCount, consumer)
 		if err != nil {
 			log.Fatalf("failed to parse docs: %v\n", err)
 		}
@@ -244,7 +245,7 @@ func BuildIndex(batch, tasks, workers int, srcDir, dstDir string, compress bool)
 		defer func() {
 			close(indexCh)
 		}()
-		BuildPartialIndex(batch, docProducer, indexConsumer, statsConsumer)
+		BuildPartialIndex(batchSize, batchCount, docProducer, indexConsumer, statsConsumer)
 	}()
 
 	tempDir := "./temp.index"
@@ -432,8 +433,8 @@ func BuildIndex(batch, tasks, workers int, srcDir, dstDir string, compress bool)
 	}
 
 	log.Printf(
-		"Batch: %d. Tasks: %d. Unigram: %d. Twogram: %d. Threegram: %d. Postings: %d. Index Size: %.2f MB. Term Stats Size: %.2f MB. Pos Stats Size: %.2f MB. Time: %v\n",
-		batch, tasks, unigrams, twograms, threegrams, postingCount,
+		"BatchSize: %d MB. BatchCount: %d. Tasks: %d. Unigram: %d. Twogram: %d. Threegram: %d. Postings: %d. Index Size: %.2f MB. Term Stats Size: %.2f MB. Pos Stats Size: %.2f MB. Time: %v\n",
+		batchSize/1000_000, batchCount, tasks, unigrams, twograms, threegrams, postingCount,
 		float64(outFStats.Size())/units.MB, float64(statsFStats.Size())/units.MB, float64(posFStats.Size())/units.MB,
 		time.Since(start))
 

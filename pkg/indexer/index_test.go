@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func testParseFiles(t *testing.T, workers, total, batch int) ([]PartialIndex, IndexStats) {
+func testParseFiles(t *testing.T, workers, total, batchSize, batchCount int) ([]PartialIndex, IndexStats) {
 	t.Helper()
 
 	srcDir := "../../DEV"
@@ -24,7 +24,7 @@ func testParseFiles(t *testing.T, workers, total, batch int) ([]PartialIndex, In
 	sort.Strings(rawFiles)
 	rawFiles = rawFiles[:total]
 
-	err = parser.ParseDirDocs(rawFiles, workers, consumer)
+	err = parser.ParseDirDocs(rawFiles, workers, batchSize, batchCount, consumer)
 	require.NoError(t, err)
 
 	docs := consumer.Collect()
@@ -41,7 +41,7 @@ func testParseFiles(t *testing.T, workers, total, batch int) ([]PartialIndex, In
 		defer func() {
 			close(waitCh)
 		}()
-		BuildPartialIndex(batch, docProducer, indexConsumer, statsConsumer)
+		BuildPartialIndex(batchSize, batchCount, docProducer, indexConsumer, statsConsumer)
 	}()
 
 	<-waitCh
@@ -52,7 +52,11 @@ func testParseFiles(t *testing.T, workers, total, batch int) ([]PartialIndex, In
 }
 
 func TestUniquePostings(t *testing.T) {
-	partialIndexes, _ := testParseFiles(t, 1, 1000, 10)
+	workers := 1
+	total := 100
+	batchSize := 100_000_000
+	batchCount := 10
+	partialIndexes, _ := testParseFiles(t, workers, total, batchSize, batchCount)
 	set := map[string]bool{}
 	for _, index := range partialIndexes {
 		for _, postings := range index {
@@ -67,7 +71,11 @@ func TestUniquePostings(t *testing.T) {
 }
 
 func TestBinaryReadWrite(t *testing.T) {
-	partialIndexes, docStats := testParseFiles(t, 1, 100, 10)
+	workers := 1
+	total := 100
+	batchSize := 100_000_000
+	batchCount := 10
+	partialIndexes, docStats := testParseFiles(t, workers, total, batchSize, batchCount)
 
 	terms := []string{}
 	for term := range partialIndexes[0] {
@@ -120,9 +128,11 @@ func TestBinaryReadWrite(t *testing.T) {
 }
 
 func TestKwayMergeReaderWriter(t *testing.T) {
-	batch := 10
+	workers := 1
+	batchSize := 100_000_000
+	batchCount := 10
 	tasks := 10
-	partialIndexes, _ := testParseFiles(t, 1, batch*tasks, batch)
+	partialIndexes, _ := testParseFiles(t, workers, batchCount*tasks, batchSize, batchCount)
 	// partialIndexes, _ := testParseFiles(t, 1, 4, 1)
 	inMemoryIndex := InMemoryMergePartialIndexes(partialIndexes...)
 

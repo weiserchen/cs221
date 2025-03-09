@@ -12,7 +12,8 @@ import (
 )
 
 func TestCache(t *testing.T) {
-	batch := 100
+	batchSize := 100_000_000
+	batchCount := 100
 	tasks := 10
 	workers := 4
 	srcDir := "../../DEV"
@@ -23,7 +24,7 @@ func TestCache(t *testing.T) {
 	})
 
 	compress := false
-	indexer.BuildIndex(batch, tasks, workers, srcDir, dstDir, compress)
+	indexer.BuildIndex(batchSize, batchCount, tasks, workers, srcDir, dstDir, compress)
 
 	indexPath := path.Join(dstDir, "term_list")
 	statsPath := path.Join(dstDir, "term_stats")
@@ -88,7 +89,8 @@ func TestCache(t *testing.T) {
 }
 
 func TestCacheCompressed(t *testing.T) {
-	batch := 100
+	batchSize := 100_000_000
+	batchCount := 100
 	tasks := 10
 	workers := 4
 	srcDir := "../../DEV"
@@ -99,7 +101,7 @@ func TestCacheCompressed(t *testing.T) {
 	})
 
 	compress := true
-	indexer.BuildIndex(batch, tasks, workers, srcDir, dstDir, compress)
+	indexer.BuildIndex(batchSize, batchCount, tasks, workers, srcDir, dstDir, compress)
 
 	indexPath := path.Join(dstDir, "term_list")
 	statsPath := path.Join(dstDir, "term_stats")
