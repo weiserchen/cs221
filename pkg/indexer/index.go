@@ -288,6 +288,13 @@ func BuildIndex(batchSize, batchCount, tasks, workers int, srcDir, dstDir string
 		os.Remove(outFile.Name())
 	}()
 
+	posFile, err := os.CreateTemp("./", "pos")
+	if err != nil {
+		log.Fatalf("failed to create pos file: %v\n", err)
+	}
+	posW := binary.NewByteWriter(binary.NewBufferedWriteCloser(posFile))
+	defer posW.Close()
+
 	bufWriter := binary.NewBufferedWriteCloser(outFile)
 	bw := binary.NewByteWriter(bufWriter)
 	defer bw.Close()
@@ -298,7 +305,6 @@ func BuildIndex(batchSize, batchCount, tasks, workers int, srcDir, dstDir string
 	unigrams := 0
 	twograms := 0
 	threegrams := 0
-	posStats := NewPosStats()
 
 	type TermBuf struct {
 		term string
@@ -335,21 +341,36 @@ func BuildIndex(batchSize, batchCount, tasks, workers int, srcDir, dstDir string
 	go func() {
 		defer close(finCh)
 		var pos uint64
+		prevTerm := ""
 		for termBuf := range bwCh {
-			if _, ok := posStats.TermStart[termBuf.term]; ok {
-				log.Fatalf("entry already existed: %s\n", termBuf.term)
+			if termBuf.term <= prevTerm {
+				log.Fatalf("entry already existed or out or order: %s\n", termBuf.term)
 			}
-			posStats.TermStart[termBuf.term] = pos
+			prevTerm = termBuf.term
+
+			if err := posW.WriteString(termBuf.term); err != nil {
+				log.Fatal(err)
+			}
+			if err := posW.WriteUInt64(pos); err != nil {
+				log.Fatal(err)
+			}
 			if _, err = bw.Write(termBuf.buf); err != nil {
 				log.Fatalf("failed to write term %s: %v\n", termBuf.term, err)
 			}
+
 			pos = bufWriter.Total()
-			posStats.TermEnd[termBuf.term] = pos
+			if err := posW.WriteUInt64(pos); err != nil {
+				log.Fatal(err)
+			}
 		}
 	}()
 
 	defer outIter.Stop()
 	for {
+		listPostingCount := 0
+		listUnigrams := 0
+		listTwograms := 0
+		listThreegrams := 0
 		_, listIter, ok := outIter.Next()
 		if !ok {
 			break
@@ -357,11 +378,11 @@ func BuildIndex(batchSize, batchCount, tasks, workers int, srcDir, dstDir string
 		plusCount := strings.Count(listIter.Term, "+")
 		switch plusCount {
 		case 1:
-			twograms++
+			listTwograms++
 		case 2:
-			threegrams++
+			listThreegrams++
 		default:
-			unigrams++
+			listUnigrams++
 		}
 
 		tempBuf := binary.NewMemBuf()
@@ -375,23 +396,27 @@ func BuildIndex(batchSize, batchCount, tasks, workers int, srcDir, dstDir string
 			if !ok {
 				break
 			}
-			postingCount++
+			listPostingCount++
 			if err := WritePosting(tempBw, posting); err != nil {
 				log.Fatalf("failed to write posting in out file: %v\n", err)
 			}
 		}
-		// if err := tempBw.WriteUInt8(uint8(PostingTypeEnd)); err != nil {
-		// 	log.Fatalf("failed to write end mark in out file: %v\n", err)
-		// }
 		if _, err := WritePostingHeader(tempBw, PostingTypeEnd, 0); err != nil {
 			log.Fatalf("failed to write end mark in out file: %v\n", err)
 		}
 
 		listIter.Stop()
 
-		gzipCh <- TermBuf{
-			term: listIter.Term,
-			buf:  tempBuf.Bytes(),
+		// ignore uncommon terms
+		if listPostingCount > 1 {
+			postingCount += listPostingCount
+			unigrams += listUnigrams
+			twograms += listTwograms
+			threegrams += listThreegrams
+			gzipCh <- TermBuf{
+				term: listIter.Term,
+				buf:  tempBuf.Bytes(),
+			}
 		}
 	}
 
@@ -419,14 +444,8 @@ func BuildIndex(batchSize, batchCount, tasks, workers int, srcDir, dstDir string
 	}
 
 	posPath := path.Join(dstDir, "term_pos")
-	posFile, err := sys.CreateFile(posPath)
-	if err != nil {
-		log.Fatalf("failed to create pos file: %v\n", err)
-	}
-	defer posFile.Close()
+	os.Rename(posFile.Name(), posPath)
 
-	posEncoder := gob.NewEncoder(posFile)
-	posEncoder.Encode(posStats)
 	posFStats, err := posFile.Stat()
 	if err != nil {
 		log.Fatalf("failed to get stat of pos file: %v\n", err)
@@ -441,4 +460,34 @@ func BuildIndex(batchSize, batchCount, tasks, workers int, srcDir, dstDir string
 	oldPath := outFile.Name()
 	indexPath := path.Join(dstDir, "term_list")
 	os.Rename(oldPath, indexPath)
+}
+
+func ReadPosFile(posFile *os.File) PosStats {
+	stats := NewPosStats()
+	posR := binary.NewByteReader(binary.NewBufferedReadCloser(posFile))
+	defer posR.Close()
+
+	for {
+		term, err := posR.ReadString()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			log.Fatal(err)
+		}
+
+		start, err := posR.ReadUInt64()
+		if err != nil {
+			log.Fatal(err)
+		}
+		end, err := posR.ReadUInt64()
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		stats.TermStart[term] = start
+		stats.TermEnd[term] = end
+	}
+
+	return *stats
 }

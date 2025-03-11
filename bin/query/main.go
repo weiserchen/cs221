@@ -8,7 +8,7 @@ import (
 func main() {
 	indexDir := "../../.index"
 	cacheSize := 256
-	workers := 4
+	workers := 20
 	k := 20
 
 	log.Println("Engine initialization started...")

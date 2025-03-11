@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/gob"
 	"log"
 	"os"
@@ -37,13 +38,12 @@ func TestIndexIntegrity(t *testing.T) {
 
 	statsFile, err := os.Open(statsPath)
 	require.NoError(t, err)
-	statsDecoder := gob.NewDecoder(statsFile)
+	statsDecoder := gob.NewDecoder(bufio.NewReader(statsFile))
 	statsDecoder.Decode(&indexStats)
 
 	posFile, err := os.Open(posPath)
 	require.NoError(t, err)
-	posDecoder := gob.NewDecoder(posFile)
-	posDecoder.Decode(&posStats)
+	posStats = indexer.ReadPosFile(posFile)
 
 	indexIter := indexer.FilePartialIndexIterator(indexPath)
 	memoryIndex := map[string][]indexer.Posting{}

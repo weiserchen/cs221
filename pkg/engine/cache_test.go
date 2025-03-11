@@ -117,8 +117,7 @@ func TestCacheCompressed(t *testing.T) {
 
 	posFile, err := os.Open(posPath)
 	require.NoError(t, err)
-	posDecoder := gob.NewDecoder(posFile)
-	posDecoder.Decode(&posStats)
+	posStats = indexer.ReadPosFile(posFile)
 
 	memCacheSize := 256
 	diskCache := NewDiskIndexListCache(indexPath, 4, posStats, compress)

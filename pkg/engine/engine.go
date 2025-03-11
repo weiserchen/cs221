@@ -56,9 +56,8 @@ func NewEngine(srcDir string, cacheSize int, workers int, compress bool) *Engine
 	if err != nil {
 		log.Fatal(err)
 	}
-	posDecoder := gob.NewDecoder(posFile)
-	posDecoder.Decode(&engine.PosStats)
-	log.Println("Pos file decoded...")
+	engine.PosStats = indexer.ReadPosFile(posFile)
+	log.Println("Pos File decoded...")
 
 	diskListCache := NewDiskIndexListCache(indexPath, workers, engine.PosStats, compress)
 	log.Println("Disk cache initialized...")
