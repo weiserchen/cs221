@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"bufio"
 	"encoding/gob"
 	"fmt"
 	"log"
@@ -12,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/c-bata/go-prompt"
 )
 
 type ResultDoc struct {
@@ -163,36 +164,75 @@ func (ng *Engine) Process(query string, k int, ranker RankAlgo) ([]ResultDoc, er
 	return result, nil
 }
 
-func (ng *Engine) Run(k int, ranker RankAlgo) {
-	scanner := bufio.NewScanner(os.Stdin)
-	for {
-		fmt.Print("Enter query: ")
-		if !scanner.Scan() {
-			break
-		}
-		query := scanner.Text()
+func (ng *Engine) RunCLI(k int, ranker RankAlgo) {
+	// scanner := bufio.NewScanner(os.Stdin)
+	p := prompt.New(
+		cliExecutor(ng, k, ranker),
+		cliCompleter,
+		prompt.OptionPrefix("Enter Query: "),
+		prompt.OptionTitle("cli-interface"),
+	)
+	p.Run()
+	// for {
+	// 	fmt.Print("Enter query: ")
+	// 	if !scanner.Scan() {
+	// 		break
+	// 	}
+	// 	query := scanner.Text()
 
-		start := time.Now()
-		list, err := ng.Process(query, k, ranker)
-		if err != nil {
-			if err == ErrCacheEntryNotFound {
-				fmt.Println("No documents!")
-				continue
-			} else {
-				log.Fatal(err)
-			}
-		}
-		// searchEnd := time.Since(start)
+	// 	start := time.Now()
+	// 	list, err := ng.Process(query, k, ranker)
+	// 	if err != nil {
+	// 		if err == ErrCacheEntryNotFound {
+	// 			fmt.Println("No documents!")
+	// 			continue
+	// 		} else {
+	// 			log.Fatal(err)
+	// 		}
+	// 	}
+	// 	// searchEnd := time.Since(start)
 
-		var sb strings.Builder
-		for i, item := range list {
-			fmt.Fprintf(&sb, "%d) %d %s %f\n", i+1, item.DocID, item.DocURL, item.Score)
+	// 	var sb strings.Builder
+	// 	for i, item := range list {
+	// 		fmt.Fprintf(&sb, "%d) %d %s %f\n", i+1, item.DocID, item.DocURL, item.Score)
+	// 	}
+	// 	totalEnd := time.Since(start)
+	// 	fmt.Fprintf(&sb, "Total Time: %v\n", totalEnd)
+	// 	fmt.Println(sb.String())
+	// }
+	// if err := scanner.Err(); err != nil {
+	// 	fmt.Println("Error:", err)
+	// }
+}
+
+func cliExecutor(ng *Engine, k int, ranker RankAlgo) func(string) {
+	return func(query string) {
+		scoreQuery(ng, k, ranker, query)
+	}
+}
+
+func scoreQuery(ng *Engine, k int, ranker RankAlgo, query string) {
+	start := time.Now()
+	list, err := ng.Process(query, k, ranker)
+	if err != nil {
+		if err == ErrCacheEntryNotFound {
+			fmt.Println("No documents!")
+		} else {
+			log.Fatal(err)
 		}
-		totalEnd := time.Since(start)
-		fmt.Fprintf(&sb, "Total Time: %v\n", totalEnd)
-		fmt.Println(sb.String())
 	}
-	if err := scanner.Err(); err != nil {
-		fmt.Println("Error:", err)
+
+	var sb strings.Builder
+	for i, item := range list {
+		fmt.Fprintf(&sb, "%d) %d %s %f\n", i+1, item.DocID, item.DocURL, item.Score)
 	}
+	totalEnd := time.Since(start)
+	fmt.Fprintf(&sb, "Total Time: %v\n", totalEnd)
+	fmt.Fprintf(&sb, "Type ctrl+d to exit.\n")
+	fmt.Println(sb.String())
+}
+
+func cliCompleter(in prompt.Document) []prompt.Suggest {
+	s := []prompt.Suggest{}
+	return prompt.FilterHasPrefix(s, in.GetWordBeforeCursor(), true)
 }

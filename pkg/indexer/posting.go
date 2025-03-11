@@ -105,7 +105,7 @@ func ParsePostings(doc parser.Doc, index PartialIndex, stats *IndexStats) {
 		posting := Posting{
 			Type:  PostingTypeText,
 			DocID: doc.ID,
-			Pos:   0, // not used
+			Pos:   65535, // not used
 		}
 		index[token] = append(index[token], posting)
 		stats.AddTerm(doc.ID, token)
