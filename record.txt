@@ -1,0 +1,4 @@
+Raw files count: 55393
+Parse thread count: 4. Processed Raw Docs: 15131. Large Files: 63. Small Files: 22900. Duplicate Files: 17299. Using 2m17.950867611s
+BatchSize: 10 MB. BatchCount: 1000. Tasks: -1. Unigram: 394271. Twogram: 1017346. Threegram: 1473639. Postings: 46335343. 
+Index Size: 296.47 MB. Term Stats Size: 2.27 MB. Pos Stats Size: 67.74 MB. Time: 2m9.594166221s

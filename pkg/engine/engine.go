@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path"
 	"petersearch/pkg/indexer"
 	"petersearch/pkg/parser"
@@ -165,44 +166,30 @@ func (ng *Engine) Process(query string, k int, ranker RankAlgo) ([]ResultDoc, er
 }
 
 func (ng *Engine) RunCLI(k int, ranker RankAlgo) {
-	// scanner := bufio.NewScanner(os.Stdin)
+	defer restoreTerminal()
 	p := prompt.New(
 		cliExecutor(ng, k, ranker),
 		cliCompleter,
 		prompt.OptionPrefix("Enter Query: "),
 		prompt.OptionTitle("cli-interface"),
+		// prompt.OptionAddKeyBind(prompt.KeyBind{
+		// 	Key: prompt.ControlD,
+		// 	Fn: func(b *prompt.Buffer) {
+		// 		println("Exiting go-prompt...")
+		// 		restoreTerminal()
+		// 	},
+		// }),
 	)
 	p.Run()
-	// for {
-	// 	fmt.Print("Enter query: ")
-	// 	if !scanner.Scan() {
-	// 		break
-	// 	}
-	// 	query := scanner.Text()
+}
 
-	// 	start := time.Now()
-	// 	list, err := ng.Process(query, k, ranker)
-	// 	if err != nil {
-	// 		if err == ErrCacheEntryNotFound {
-	// 			fmt.Println("No documents!")
-	// 			continue
-	// 		} else {
-	// 			log.Fatal(err)
-	// 		}
-	// 	}
-	// 	// searchEnd := time.Since(start)
+// Restore terminal settings before exiting
+func restoreTerminal() {
+	rawModeOff := exec.Command("/bin/stty", "-raw", "sane")
+	rawModeOff.Stdin = os.Stdin
+	_ = rawModeOff.Run()
+	rawModeOff.Wait()
 
-	// 	var sb strings.Builder
-	// 	for i, item := range list {
-	// 		fmt.Fprintf(&sb, "%d) %d %s %f\n", i+1, item.DocID, item.DocURL, item.Score)
-	// 	}
-	// 	totalEnd := time.Since(start)
-	// 	fmt.Fprintf(&sb, "Total Time: %v\n", totalEnd)
-	// 	fmt.Println(sb.String())
-	// }
-	// if err := scanner.Err(); err != nil {
-	// 	fmt.Println("Error:", err)
-	// }
 }
 
 func cliExecutor(ng *Engine, k int, ranker RankAlgo) func(string) {

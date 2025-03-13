@@ -53,6 +53,13 @@ func NewBufferedReadCloser(r io.ReadCloser) *BufferedReadCloser {
 	}
 }
 
+func NewBufferedReadCloserSize(r io.ReadCloser, size int) *BufferedReadCloser {
+	return &BufferedReadCloser{
+		r:  bufio.NewReaderSize(r, size),
+		rc: r,
+	}
+}
+
 func (br *BufferedReadCloser) Read(p []byte) (n int, err error) {
 	return io.ReadFull(br.r, p)
 }
@@ -106,7 +113,17 @@ func (bw *ByteWriter) Write(b []byte) (int, error) {
 
 func (bw *ByteWriter) WriteBytes(b []byte) error {
 	var err error
-	err = binary.Write(bw.w, binary.LittleEndian, int64(len(b)))
+	err = binary.Write(bw.w, binary.LittleEndian, uint64(len(b)))
+	if err != nil {
+		return err
+	}
+	_, err = bw.w.Write(b)
+	return err
+}
+
+func (bw *ByteWriter) WriteCompactBytes(b []byte) error {
+	var err error
+	err = binary.Write(bw.w, binary.LittleEndian, uint16(len(b)))
 	if err != nil {
 		return err
 	}
@@ -116,6 +133,10 @@ func (bw *ByteWriter) WriteBytes(b []byte) error {
 
 func (bw *ByteWriter) WriteString(s string) error {
 	return bw.WriteBytes([]byte(s))
+}
+
+func (bw *ByteWriter) WriteCompactString(s string) error {
+	return bw.WriteCompactBytes([]byte(s))
 }
 
 func (bw *ByteWriter) WriteInt(i int) error {
@@ -158,7 +179,19 @@ func NewBufferedByteReader(r io.ReadCloser) *ByteReader {
 
 func (br *ByteReader) ReadBytes() ([]byte, error) {
 	var err error
-	var length int64
+	var length uint64
+	err = binary.Read(br.r, binary.LittleEndian, &length)
+	if err != nil {
+		return nil, err
+	}
+	b := make([]byte, length)
+	_, err = br.r.Read(b)
+	return b, err
+}
+
+func (br *ByteReader) ReadCompactBytes() ([]byte, error) {
+	var err error
+	var length uint16
 	err = binary.Read(br.r, binary.LittleEndian, &length)
 	if err != nil {
 		return nil, err
@@ -170,6 +203,14 @@ func (br *ByteReader) ReadBytes() ([]byte, error) {
 
 func (br *ByteReader) ReadString() (string, error) {
 	b, err := br.ReadBytes()
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func (br *ByteReader) ReadCompactString() (string, error) {
+	b, err := br.ReadCompactBytes()
 	if err != nil {
 		return "", err
 	}

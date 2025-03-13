@@ -339,19 +339,18 @@ func BuildIndex(batchSize, batchCount, tasks, workers int, srcDir, dstDir string
 	}()
 
 	go func() {
-		defer close(finCh)
 		var pos uint64
 		prevTerm := ""
+		defer func() {
+			close(finCh)
+		}()
 		for termBuf := range bwCh {
 			if termBuf.term <= prevTerm {
 				log.Fatalf("entry already existed or out or order: %s\n", termBuf.term)
 			}
 			prevTerm = termBuf.term
 
-			if err := posW.WriteString(termBuf.term); err != nil {
-				log.Fatal(err)
-			}
-			if err := posW.WriteUInt64(pos); err != nil {
+			if err := posW.WriteCompactString(termBuf.term); err != nil {
 				log.Fatal(err)
 			}
 			if _, err = bw.Write(termBuf.buf); err != nil {
@@ -408,7 +407,7 @@ func BuildIndex(batchSize, batchCount, tasks, workers int, srcDir, dstDir string
 		listIter.Stop()
 
 		// ignore uncommon terms
-		if listPostingCount > 1 {
+		if len(listIter.Term) < 65535 && listPostingCount > 1 {
 			postingCount += listPostingCount
 			unigrams += listUnigrams
 			twograms += listTwograms
@@ -464,11 +463,12 @@ func BuildIndex(batchSize, batchCount, tasks, workers int, srcDir, dstDir string
 
 func ReadPosFile(posFile *os.File) PosStats {
 	stats := NewPosStats()
-	posR := binary.NewByteReader(binary.NewBufferedReadCloser(posFile))
+	posR := binary.NewByteReader(binary.NewBufferedReadCloserSize(posFile, 4096))
 	defer posR.Close()
 
+	var start uint64
 	for {
-		term, err := posR.ReadString()
+		term, err := posR.ReadCompactString()
 		if err != nil {
 			if err == io.EOF {
 				break
@@ -476,10 +476,6 @@ func ReadPosFile(posFile *os.File) PosStats {
 			log.Fatal(err)
 		}
 
-		start, err := posR.ReadUInt64()
-		if err != nil {
-			log.Fatal(err)
-		}
 		end, err := posR.ReadUInt64()
 		if err != nil {
 			log.Fatal(err)
@@ -487,6 +483,8 @@ func ReadPosFile(posFile *os.File) PosStats {
 
 		stats.TermStart[term] = start
 		stats.TermEnd[term] = end
+
+		start = end
 	}
 
 	return *stats
